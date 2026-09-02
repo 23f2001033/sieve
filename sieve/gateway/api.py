@@ -32,15 +32,15 @@ from sieve.gateway.inventory import Northlight, SystemClock
 from sieve.gateway.ledger import SqliteLedger
 from sieve.gateway.nonce import SqliteNonceStore
 from sieve.naive.gateway import NaiveGateway
-from sieve.suite.attacks.authorization import AUTHORIZATION_ATTACKS
+from sieve.suite.attacks import ALL_ATTACKS
 from sieve.suite.runner import run_corpus
 from sieve.suite.world import MERCHANT_ID, World
 
 UI_FILE = Path(__file__).resolve().parent.parent.parent / "ui" / "console.html"
 
-# The live corpus. Grows as families B/C/D land; the UI reads whatever is here,
-# so the scoreboard reflects the real attack set rather than a hardcoded 16.
-LIVE_ATTACKS = list(AUTHORIZATION_ATTACKS)
+# The live corpus. The UI reads whatever is here, so the scoreboard reflects the
+# real attack set rather than a hardcoded 16.
+LIVE_ATTACKS = list(ALL_ATTACKS)
 LIVE_BENIGN: list = []
 
 

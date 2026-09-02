@@ -236,3 +236,49 @@ authorship) through as `allowed`.
 44 tests passing. Next: the remaining three attack families (delegation, budget/
 concurrency, data-plane), the seeded benign corpus for the false-refusal
 denominator, and the report formatter.
+
+---
+
+## 2026-09-02 (later still) — the full 16-attack corpus, and a GIL honesty call
+
+Families B (delegation chain), C (budget/scope/concurrency) and D (data plane)
+landed, plus the live API wiring. Full corpus result, reproduced by
+`test_full_corpus.py`:
+
+**SIEVE 16/16, each contained via the exact reason its attack targets. Naive
+3/16.** The naive design fails all four delegation-chain attacks (it inspects
+only the leaf mandate), both scope attacks, the aggregate-budget evasion, the
+total/price/stock manipulations, and the prompt injection.
+
+Care taken to keep the 16 mechanistically distinct rather than one attack in
+four parameter dresses: B5 forges a signature, B6 splices linkage, B7 violates
+the narrowing invariant, B8 exhausts depth — four different checks, not four
+flavours of "authority too small".
+
+### #7 — The concurrency attack, and a number I refused to claim
+
+C11 (concurrent double-spend) came back **contained by the naive gateway too** —
+25 barrier-released threads, and naive reported exactly one charge. First
+instinct was that this was wrong, or that the naive baseline should obviously
+double-charge here. It doesn't, and the honest reason is the GIL.
+
+Naive's nonce guard is a non-atomic check-then-add. Under true parallelism that
+window double-charges. But in a single Python process the GIL serialises the
+threads finely enough that the first submission adds the nonce before the next
+one checks, so naive catches the rest as replays. Ran it 12 times: naive is
+*stably* one-charge in this harness.
+
+So the honest position, written into the docs rather than smoothed over: **C11
+is contained by both gateways in an in-process harness.** SIEVE's containment
+rests on an atomic `INSERT` against a unique key — it holds across processes and
+machines. Naive's rests on GIL serialisation — it would not survive two
+processes. I could have manufactured a naive double-charge by adding an artificial
+delay inside its critical section, but that would be simulating the failure, not
+demonstrating it, and simulating the very thing this project exists to test
+honestly would be the worst possible unforced error. C11 is therefore *not*
+counted as a differential win; the differential is 16 vs 3 on the attacks where
+the gap is real and reproducible. SIEVE's exactly-once guarantee is proven on
+its own terms by the dedicated barrier test, independent of the GIL.
+
+49 tests passing. Next: the seeded benign corpus (the false-refusal
+denominator), the report formatter, and wiring the console to the live API.

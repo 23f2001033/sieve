@@ -24,6 +24,7 @@ module in the guarded path.
 from __future__ import annotations
 
 import threading
+from dataclasses import replace
 
 from sieve.contracts.mandate import Intent
 from sieve.contracts.verdict import ReasonCode, Verdict
@@ -80,9 +81,13 @@ class SieveGateway:
             return verdict
 
         # Lost the claim: another caller is (or was) executing this exact key.
-        # Wait for and replay their verdict rather than re-deciding.
+        # Wait for and replay their verdict rather than re-deciding. The replayed
+        # verdict is marked so a caller (and the concurrency attack) can tell a
+        # fresh charge from a replay of one — exactly-once means one fresh charge,
+        # N-1 replays.
         outcome = self._idem.await_outcome(key)
-        return _verdict_from_payload(outcome.payload)
+        verdict = _verdict_from_payload(outcome.payload)
+        return replace(verdict, evidence={**verdict.evidence, "replayed": True})
 
     def _authorise_and_commit(self, intent: Intent) -> Verdict:
         # The budget check reads spent, and on ALLOW the commit increments it.
