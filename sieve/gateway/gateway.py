@@ -49,7 +49,10 @@ class SieveGateway:
         merchant_id: str,
         trusted_roots: frozenset[str],
         revoked_keys: frozenset[str] = frozenset(),
+        payments=None,
     ) -> None:
+        from sieve.gateway.razorpay import NullRail
+
         self._catalog = catalog
         self._nonces = nonce_store
         self._idem = idempotency_store
@@ -58,6 +61,9 @@ class SieveGateway:
         self._merchant_id = merchant_id
         self._trusted_roots = trusted_roots
         self._revoked_keys = revoked_keys
+        # The payment rail is reached at exactly one point: after ALLOW. A
+        # refusal never produces a call, and the ledger records that it didn't.
+        self._payments = payments or NullRail()
 
         # Cumulative spend per root authority. In-memory and lock-guarded: the
         # single-node serialisation point for the budget invariant.
@@ -109,10 +115,27 @@ class SieveGateway:
             )
 
             if verdict.allowed:
-                self._spent[root] = spent + verdict.evidence["total_paise"]
-                self._ledger.append("allow", intent_ledger_body(intent, verdict))
+                total = verdict.evidence["total_paise"]
+                self._spent[root] = spent + total
+                # Money moves only here — downstream of the verdict, never before.
+                order = self._payments.create_order(
+                    amount_paise=total,
+                    receipt=intent.idempotency_key[:40],
+                    notes={"merchant": intent.merchant_id, "agent": intent.signer[:16]},
+                )
+                verdict = replace(
+                    verdict,
+                    evidence={**verdict.evidence, "razorpay": order.to_json()},
+                )
+                body = intent_ledger_body(intent, verdict)
+                body["razorpay"] = order.to_json()
+                self._ledger.append("allow", body)
             else:
-                self._ledger.append("refuse", intent_ledger_body(intent, verdict))
+                body = intent_ledger_body(intent, verdict)
+                # Recorded explicitly rather than omitted: the absence of a
+                # payment call is itself evidence worth auditing.
+                body["razorpay"] = {"status": "no_call", "detail": "refused before payment"}
+                self._ledger.append("refuse", body)
 
             return verdict
 

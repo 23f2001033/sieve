@@ -98,19 +98,37 @@ class LLMClient:
             payload["tools"] = tools
             payload["tool_choice"] = "auto"
 
-        try:
-            r = httpx.post(
-                f"{self.base_url}/chat/completions",
-                headers={"Authorization": f"Bearer {self.api_key}",
-                         "Content-Type": "application/json"},
-                json=payload,
-                timeout=self.timeout,
-            )
-        except httpx.HTTPError as exc:
-            raise LLMUnavailable(f"transport error talking to {self.base_url}: {exc}") from exc
+        # A 429 is a wait, not a failure. Providers publish a per-minute token
+        # budget and tell you how long to pause; treating that as fatal would
+        # abandon a run for a few seconds of patience.
+        import re
+        import time
+
+        last_error = ""
+        for attempt in range(4):
+            try:
+                r = httpx.post(
+                    f"{self.base_url}/chat/completions",
+                    headers={"Authorization": f"Bearer {self.api_key}",
+                             "Content-Type": "application/json"},
+                    json=payload,
+                    timeout=self.timeout,
+                )
+            except httpx.HTTPError as exc:
+                raise LLMUnavailable(
+                    f"transport error talking to {self.base_url}: {exc}") from exc
+
+            if r.status_code == 429 and attempt < 3:
+                match = re.search(r"try again in ([\d.]+)s", r.text)
+                delay = float(match.group(1)) + 0.5 if match else 2.0 * (attempt + 1)
+                time.sleep(min(delay, 30.0))
+                last_error = r.text[:200]
+                continue
+            break
 
         if r.status_code >= 400:
-            raise LLMUnavailable(f"{r.status_code} from provider: {r.text[:300]}")
+            hint = " (rate limited after retries)" if r.status_code == 429 else ""
+            raise LLMUnavailable(f"{r.status_code} from provider{hint}: {r.text[:300] or last_error}")
 
         try:
             return r.json()["choices"][0]["message"]

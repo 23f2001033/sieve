@@ -84,9 +84,13 @@ class Demo:
 
         d = Path(tempfile.gettempdir()) / "sieve-api" / uuid.uuid4().hex
         d.mkdir(parents=True, exist_ok=True)
+        from sieve.gateway.razorpay import RazorpayTestMode
+
         self.world = World()
         self.ledger = SqliteLedger(str(d / "ledger.db"))
+        self.rail = RazorpayTestMode()
         self.gateway = SieveGateway(
+            payments=self.rail,
             catalog=self.world.catalog,
             nonce_store=SqliteNonceStore(str(d / "nonce.db")),
             idempotency_store=SqliteIdempotencyStore(str(d / "idem.db")),
@@ -112,7 +116,9 @@ def create_app() -> FastAPI:
 
     @app.get("/v1/health")
     async def health():
-        return {"ok": True, "attacks": len(LIVE_ATTACKS), "merchant": MERCHANT_ID}
+        return {"ok": True, "attacks": len(LIVE_ATTACKS), "merchant": MERCHANT_ID,
+                "razorpay": {"configured": demo.rail.configured,
+                             "test_mode": demo.rail.is_test_mode}}
 
     @app.post("/v1/purchase")
     async def purchase(sku: str = "sku_tote"):
