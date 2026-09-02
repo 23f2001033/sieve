@@ -22,6 +22,7 @@ import json
 from pathlib import Path
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from sse_starlette.sse import EventSourceResponse
 
@@ -103,6 +104,18 @@ class Demo:
 
 def create_app() -> FastAPI:
     app = FastAPI(title="SIEVE", version="0.1.0")
+
+    # Permissive CORS so the console can be hosted separately from the gateway
+    # (static page on one host, gateway on another) via ?api=<url>. Safe here:
+    # every endpoint is a read or a sandboxed demo action against test-mode
+    # credentials — there is no user session or cookie to protect.
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_methods=["GET", "POST"],
+        allow_headers=["*"],
+    )
+
     bus = Broadcaster()
     demo = Demo()
 

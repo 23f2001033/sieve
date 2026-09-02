@@ -34,3 +34,6 @@ ledger.db*
 # OS
 .DS_Store
 Thumbs.db
+
+# Vercel
+.vercel
