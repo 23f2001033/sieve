@@ -436,4 +436,34 @@ Also added 429 handling to the LLM client — Groq's free tier is 8,000 TPM and 
 first red-team run exhausted it mid-flight. A rate limit is a wait, not a failure;
 the client now honours the provider's own suggested delay and retries.
 
-**73 tests passing.**
+### #11 — The no-LLM guard caught me, on real code, for real
+
+The best evidence a guard isn't theatre is that it fails when you least want it
+to. Running the suite after wiring Razorpay:
+
+```
+FAILED tests/test_no_llm_in_policy.py::test_policy_path_imports_no_model_client
+```
+
+`sieve/gateway/razorpay.py` needed `.env` credentials, and the `.env` loader
+happened to live in `sieve/agents/llm.py`, so I imported it from there — inside a
+function, thinking that made it inert. It did not: the guard walks the AST, so
+function-level imports count, and the chain was `gateway.py → razorpay.py →
+sieve.agents.llm`. The money path had a live route to a model client.
+
+Nothing was actually calling an LLM. That is precisely why a mechanical guard
+matters — the violation was structural and invisible, introduced by an
+unremarkable convenience import while I was thinking about payments, not about
+boundaries. Left alone it would have sat there until the claim in the README was
+quietly false.
+
+Fixed by putting the loader on neutral ground: `sieve/config.py`, importable by
+the rail and the agents alike, so neither side has to reach through the other.
+Added `razorpay.py` and `config.py` to the guarded list explicitly.
+
+Two things I'd note against myself. I ran the commit in the same shell chain as
+the test and used `||`, so the commit landed *despite* the failure — sloppy, and
+fixed in the follow-up commit. And the fix is not a workaround: sharing a
+dependency is genuinely the right structure, and the guard pushed me to it.
+
+**80 tests passing.**

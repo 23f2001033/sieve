@@ -34,6 +34,8 @@ POLICY_MODULES = [
     "sieve/gateway/idempotency.py",
     "sieve/gateway/ledger.py",
     "sieve/gateway/inventory.py",
+    "sieve/gateway/razorpay.py",
+    "sieve/config.py",
 ]
 
 # Model clients and inference libraries. Substring match on the top-level import

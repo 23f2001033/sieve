@@ -22,6 +22,8 @@ from typing import Any
 
 import httpx
 
+from sieve.config import load_env
+
 API_ROOT = "https://api.razorpay.com/v1"
 
 
@@ -42,10 +44,6 @@ class OrderResult:
 class RazorpayTestMode:
     def __init__(self, *, key_id: str | None = None, key_secret: str | None = None,
                  timeout: float = 20.0) -> None:
-        # Imported here rather than at module scope so the money path does not
-        # depend on the agents package for env loading.
-        from sieve.agents.llm import load_env  # noqa: PLC0415  (env only)
-
         try:
             load_env()
         except Exception:
