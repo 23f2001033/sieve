@@ -36,6 +36,7 @@ from sieve.suite.attacks import ALL_ATTACKS
 from sieve.suite.benign.cases import benign_corpus
 from sieve.suite.report import summary_json
 from sieve.suite.runner import run_corpus
+from sieve.suite.targets import build_naive, build_sieve
 from sieve.suite.world import MERCHANT_ID, World
 
 UI_FILE = Path(__file__).resolve().parent.parent.parent / "ui" / "console.html"
@@ -123,6 +124,50 @@ def create_app() -> FastAPI:
         verdict = demo.gateway.submit(intent)
         await emit(intent.to_body(), verdict)
         return JSONResponse(verdict.to_json())
+
+    @app.get("/v1/attacks")
+    async def attacks():
+        """Corpus metadata, so the scoreboard can render the real attack set
+        before anything has been run."""
+        return [
+            {"attack_id": a.attack_id, "family": a.family, "name": a.name,
+             "expected": sorted(r.value for r in a.expected_reasons)}
+            for a in LIVE_ATTACKS
+        ]
+
+    @app.post("/v1/attack/{attack_id}")
+    async def run_one(attack_id: str):
+        """Run ONE attack and return the real verification steps behind the
+        verdict — this is what the glass box renders. Attacks that need several
+        submissions (replay, aggregate budget, the concurrency race) report their
+        result without a single step trace, which the UI states plainly."""
+        attack = next((a for a in LIVE_ATTACKS if a.attack_id == attack_id), None)
+        if attack is None:
+            return JSONResponse({"error": f"unknown attack {attack_id}"}, status_code=404)
+
+        w = World()
+        sieve_gw = build_sieve(w)
+        naive_gw = build_naive(w)
+
+        payload: dict = {"attack_id": attack_id, "name": attack.name, "family": attack.family}
+        try:
+            verdict = attack.perform(sieve_gw, w)
+            payload["sieve"] = verdict.to_json()
+            await emit({"attack": attack_id}, verdict)
+        except NotImplementedError:
+            payload["sieve"] = None
+            payload["note"] = "multi-submission attack — see result summary"
+
+        # Fresh world for the naive run so neither gateway sees the other's state.
+        w2 = World()
+        result_sieve = attack.run(build_sieve(w2), w2)
+        w3 = World()
+        result_naive = attack.run(build_naive(w3), w3)
+        payload["result"] = {
+            "sieve": result_sieve.to_json(),
+            "naive": result_naive.to_json(),
+        }
+        return JSONResponse(payload)
 
     @app.post("/v1/run-benign")
     async def run_benign(count: int = 120):

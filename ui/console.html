@@ -14,7 +14,6 @@
         bg: '#0B0E14', panel: '#13151A', panel2: '#171A21', line: '#1F232E',
         txt: '#E8E9ED', dim: '#8B8F99', faint: '#5A5F6B',
         accent: '#0C55F7', ok: '#00D26A', bad: '#FF4D4F', warn: '#FFB020',
-        famA: '#0C55F7', famB: '#8B5CF6', famC: '#00B8D4', famD: '#FFB020',
       },
       fontFamily: {
         sans: ['Inter', 'system-ui', 'sans-serif'],
@@ -31,266 +30,244 @@
   ::-webkit-scrollbar-thumb { background: #262b38; border-radius: 4px; }
   ::-webkit-scrollbar-track { background: transparent; }
   @keyframes pulse-dot { 0%,100% { opacity: 1; transform: scale(1); } 50% { opacity: .35; transform: scale(.82); } }
-  @keyframes sweep { from { transform: translateX(-100%); } to { transform: translateX(300%); } }
   @keyframes rowin { from { opacity: 0; transform: translateY(-3px); } to { opacity: 1; transform: none; } }
   .pulse { animation: pulse-dot 1.8s ease-in-out infinite; }
-  .rowin { animation: rowin .28s ease-out; }
-  .scan { position:absolute; inset:0; overflow:hidden; }
-  .scan::after { content:''; position:absolute; top:0; bottom:0; width:40%;
-    background: linear-gradient(90deg, transparent, rgba(12,85,247,.10), transparent); animation: sweep 1.9s linear infinite; }
-  @media (prefers-reduced-motion: reduce) { .pulse, .scan::after, .rowin { animation: none !important; } }
+  .rowin { animation: rowin .24s ease-out; }
+  @media (prefers-reduced-motion: reduce) { .pulse, .rowin { animation: none !important; } }
   .tnum { font-variant-numeric: tabular-nums; }
 </style>
 <div id="root"></div>
 <script type="text/babel" data-presets="react">
 const { useState, useEffect, useRef, useCallback } = React;
 
-const ATTACKS = [
-  { id: 'M01', name: 'Nonce replay', fam: 'A' },
-  { id: 'M02', name: 'Forged issuer signature', fam: 'A' },
-  { id: 'M03', name: 'Expired mandate reuse', fam: 'A' },
-  { id: 'M04', name: 'Chain link splice', fam: 'B' },
-  { id: 'M05', name: 'Scope escalator (SKU → *)', fam: 'B' },
-  { id: 'M06', name: 'Expiry extension at hop', fam: 'B' },
-  { id: 'M07', name: 'Authority widening at a hop', fam: 'B' },
-  { id: 'M08', name: 'Aggregate budget evasion', fam: 'C' },
-  { id: 'M09', name: 'Split-payment under cap', fam: 'C' },
-  { id: 'M10', name: 'Currency confusion', fam: 'C' },
-  { id: 'M11', name: 'Prompt-injected merchant note', fam: 'D' },
-  { id: 'M12', name: 'Idempotency key collision', fam: 'D' },
-  { id: 'M13', name: 'Concurrent double-spend', fam: 'D' },
-  { id: 'M14', name: 'Ledger rewrite (seq #47)', fam: 'D' },
-  { id: 'M15', name: 'Webhook forgery', fam: 'D' },
-  { id: 'M16', name: 'Refund-to-attacker redirect', fam: 'D' },
-];
-const FAM = { A: 'famA', B: 'famB', C: 'famC', D: 'famD' };
+/* ── Recorded fallback ───────────────────────────────────────────────────────
+   When the console is opened without the SIEVE server behind it (e.g. as a
+   published page), it shows data RECORDED FROM A REAL RUN rather than invented
+   numbers, and labels itself RECORDED so it never claims to be live.          */
+
+const RECORDED_ATTACKS = [
+  ['A1','Nonce replay of a consumed intent'], ['A2','Line-item price lowered after signing'],
+  ['A3','Intent signed by a non-delegated key'], ['A4','Intent on an expired delegation'],
+  ['B5','Forged issuer signature on an intermediate link'], ['B6','Chain link splice'],
+  ['B7','Authority widening at a hop'], ['B8','Delegation depth bomb'],
+  ['C9','Aggregate budget evasion'], ['C10','Category scope creep'],
+  ['C11','Concurrent double-spend (raced)'], ['C12','Acting without the payment capability'],
+  ['D13','Prompt injection via product description'], ['D14','Signed total understated vs items'],
+  ['D15','TOCTOU — price moved between quote and settle'], ['D16','Overselling beyond stock'],
+].map(([attack_id, name]) => ({ attack_id, name, family: attack_id[0] }));
+
+const RECORDED_B7 = {
+  allowed: false, reason_code: 'authority_widened',
+  explanation: 'Delegation hop 1 granted more authority than it holds: amount ceiling widened: child allows 500000 paise, parent allows 50000.',
+  steps: [
+    { name:'merchant_match', passed:true, detail:'intent is addressed to this merchant', duration_us:14, evidence:{} },
+    { name:'chain_depth', passed:true, detail:'chain depth 2 within maximum 8', duration_us:6, evidence:{depth:2,max_depth:8} },
+    { name:'chain_root_trusted', passed:true, detail:'chain root is a registered human key', duration_us:5, evidence:{} },
+    { name:'chain_acyclic', passed:true, detail:'no key repeats in the chain', duration_us:4, evidence:{} },
+    { name:'chain_linkage', passed:true, detail:'all 1 hand-offs link correctly', duration_us:4, evidence:{} },
+    { name:'keys_not_revoked', passed:true, detail:'no key in the chain is revoked', duration_us:3, evidence:{} },
+    { name:'links_unexpired', passed:true, detail:'all 2 links are within validity', duration_us:5, evidence:{} },
+    { name:'link_signatures', passed:true, detail:'all 2 link signatures verify', duration_us:210, evidence:{} },
+    { name:'authority_narrowing', passed:false, detail:'hop 1 widened authority: amount ceiling widened: child allows 500000 paise, parent allows 50000', duration_us:11,
+      evidence:{ hop:1, violations:['amount ceiling widened: child allows 500000 paise, parent allows 50000'] } },
+  ],
+};
+
+const RECORDED_SUMMARY = {
+  sieve: { contained: 16, total: 16 }, naive: { contained: 3, total: 16 },
+  falseRefusal: { n: 10, total: 1000, lo: 0.54, hi: 1.83 },
+};
 
 const PRODUCTS = [
-  { sku: 'sku_mug', name: 'Ceramic mug', price: 450, stock: 12 },
-  { sku: 'sku_tote', name: 'Linen tote', price: 1200, stock: 4, attacked: true },
-  { sku: 'sku_lamp', name: 'Brass lamp', price: 3800, stock: 1 },
+  { sku: 'TENT-2P', name: 'Ridgeline 2P Tent', price: 89900, stock: 10, cat: 'outdoor' },
+  { sku: 'TRAILMUG', name: 'Trail Titanium Mug', price: 12900, stock: 10, cat: 'kitchen' },
+  { sku: 'MAP-IN', name: 'Western Ghats Trail Map', price: 7900, stock: 10, cat: 'books' },
 ];
 
-const STAGES = [
-  { n: 1, name: 'Signature verify (Ed25519)', ms: '0.42 ms', status: 'pass',
-    json: ['{ "alg":"Ed25519", "kid":"issuer:razorpay-test",', '  "payload.sha256":"b7e1d0e4…", "sig":"3f9a…c21e" }'],
-    note: 'sig valid for kid' },
-  { n: 2, name: 'Chain linkage check', ms: '0.18 ms', status: 'pass',
-    json: ['{ "hop":2, "parent":"…w0iH7X…", "child":"…m1K7Y…",', '  "parent_hash":"9c4f…e802", "child.prev":"9c4f…e802" }'],
-    note: 'child.prev = hash(parent)' },
-  { n: 3, name: 'Narrowing invariant — max ↓, scope ↓, expiry ↓', ms: '0.69 ms', status: 'pass',
-    json: ['{ "parent":{ "max":1200, "scope":["sku_tote"], "exp":17752… },', '  "child": { "max":1200, "scope":["sku_tote"], "exp":17752… } }'],
-    note: '1200 ≤ 1200 · scope ⊆ parent · exp ≤ parent.exp' },
-  { n: 4, name: 'Policy engine', ms: '0.11 ms', status: 'fail', badge: 'NO LLM · CI-ENFORCED',
-    json: ['{ "actor":"sub-agent:buyer-2", "claims":["pay","refund"],', '  "held":["pay"], "delta":["refund"] }', 'RULE P-04:  claimed ⊄ held'],
-    note: 'capability widened' },
-  { n: 5, name: 'Verdict', status: 'refuse',
-    reason: 'Sub-agent granted itself more authority than it holds. Hop 2 claimed "refund" but its parent only delegated "pay". Authority can only narrow along a chain — it can never widen.' },
-];
-
-const INIT_SSE = [
-  { t: '14:02:15.796', ev: 'MANDATE_VERIFIED', hash: 'a55f00e2', v: 'ALLOW' },
-  { t: '14:02:15.041', ev: 'POLICY_ALLOWED', hash: '2857ac8b', v: 'ALLOW' },
-  { t: '14:02:15.153', ev: 'LEDGER_APPENDED', hash: 'aad446ad', v: 'PROV' },
-  { t: '14:02:15.190', ev: 'POLICY_REFUSED', hash: 'a6c9ecbf', v: 'REFUSE' },
-  { t: '14:02:16.212', ev: 'MANDATE_VERIFIED', hash: '7b23aa11', v: 'ALLOW' },
-  { t: '14:02:16.244', ev: 'POLICY_REFUSED', hash: 'c41d09af', v: 'REFUSE' },
-  { t: '14:02:16.301', ev: 'LEDGER_APPENDED', hash: '88a63e0f', v: 'PROV' },
-];
-
-const rupee = (n) => '₹' + n.toLocaleString('en-IN');
-const rndHash = () => Math.random().toString(16).slice(2, 10);
-const now = () => { const d = new Date(); const p = (x, n=2) => String(x).padStart(n, '0');
+const FAMC = { A: '#0C55F7', B: '#8B5CF6', C: '#00B8D4', D: '#FFB020' };
+const rupee = (p) => '₹' + (p / 100).toLocaleString('en-IN', { minimumFractionDigits: 2 });
+const stamp = () => { const d=new Date(),p=(x,n=2)=>String(x).padStart(n,'0');
   return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}.${p(d.getMilliseconds(),3)}`; };
 
-function Dot({ color, pulse }) {
-  return <span className={`inline-block w-1.5 h-1.5 rounded-full ${pulse ? 'pulse' : ''}`} style={{ background: color, boxShadow: `0 0 6px ${color}` }} />;
+function Dot({ c, pulse }) {
+  return <span className={`inline-block w-1.5 h-1.5 rounded-full ${pulse?'pulse':''}`} style={{background:c,boxShadow:`0 0 6px ${c}`}} />;
 }
+const Divider = () => <span className="w-px h-4 bg-line" />;
 
-function Divider() { return <span className="w-px h-4 bg-line" />; }
-
-function StatusBar({ contained }) {
+/* ── Status bar ───────────────────────────────────────────────────────────── */
+function StatusBar({ live, summary, contained, total }) {
+  const fr = summary.falseRefusal;
   return (
-    <header className="h-12 shrink-0 flex items-center gap-4 px-4 border-b border-line bg-panel/60 backdrop-blur">
-      <div className="flex items-center gap-2">
-        <span className="font-bold tracking-tight text-[15px]">SIEVE</span>
-        <span className="flex items-center gap-1.5 text-[10px] font-semibold text-ok tracking-wider">
-          <Dot color="#00D26A" pulse /> LIVE
-        </span>
-      </div>
+    <header className="h-12 shrink-0 flex items-center gap-4 px-4 border-b border-line bg-panel/60">
+      <span className="font-bold tracking-tight text-[15px]">SIEVE</span>
+      {live
+        ? <span className="flex items-center gap-1.5 text-[10px] font-semibold text-ok tracking-wider"><Dot c="#00D26A" pulse /> LIVE</span>
+        : <span className="flex items-center gap-1.5 text-[10px] font-semibold text-warn tracking-wider" title="No SIEVE server behind this page — showing data recorded from a real run"><Dot c="#FFB020" /> RECORDED</span>}
       <Divider />
       <span className="text-xs text-dim">Track 01 · Agentic Commerce</span>
       <div className="flex-1" />
       <div className="flex items-center gap-4 text-xs">
-        <span className="tnum"><b className="text-txt font-semibold">{contained}/16</b> <span className="text-dim">contained</span></span>
+        <span className="tnum"><b className="font-semibold">{contained}/{total}</b> <span className="text-dim">contained</span></span>
         <Divider />
-        <span className="tnum"><b className="text-txt font-semibold">1/47</b> <span className="text-dim">false refusal</span></span>
+        <span className="tnum"><b className="font-semibold">{fr.n}/{fr.total}</b> <span className="text-dim">false refusal</span>
+          <span className="text-faint ml-1">({fr.lo}–{fr.hi}% CI)</span></span>
         <Divider />
-        <span className="flex items-center gap-1.5"><span className="text-dim">ledger</span> <span className="text-ok font-semibold">✓</span></span>
+        <span><span className="text-dim">ledger</span> <span className="text-ok font-semibold">✓</span></span>
       </div>
       <div className="flex-1" />
-      <div className="flex items-center gap-2 text-xs text-dim">
-        <Dot color="#00D26A" /> Razorpay test mode · MCP connected
-        <svg width="15" height="15" viewBox="0 0 16 16" fill="currentColor" className="text-dim ml-1"><path d="M8 0C3.58 0 0 3.58 0 8a8 8 0 0 0 5.47 7.59c.4.07.55-.17.55-.38v-1.3c-2.23.48-2.7-1.08-2.7-1.08-.36-.92-.89-1.17-.89-1.17-.73-.5.05-.49.05-.49.8.06 1.23.83 1.23.83.71 1.23 1.87.87 2.33.66.07-.52.28-.87.5-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82a7.6 7.6 0 0 1 4 0c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.28.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48v2.2c0 .21.15.46.55.38A8 8 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg>
-      </div>
+      <span className="flex items-center gap-2 text-xs text-dim">
+        <Dot c={live?'#00D26A':'#5A5F6B'} /> {live ? 'gateway connected' : 'no gateway — recorded run'}
+      </span>
     </header>
   );
 }
 
-function Storefront() {
+/* ── Storefront ───────────────────────────────────────────────────────────── */
+function Storefront({ onBuy, busy, targetSku }) {
   return (
-    <aside className="w-[336px] shrink-0 flex flex-col border-r border-line bg-panel/30 overflow-hidden">
-      <div className="flex items-center justify-between px-4 h-10 border-b border-line">
-        <span className="text-[11px] font-semibold tracking-wider text-dim">STOREFRONT <span className="text-faint font-normal ml-1">MCP · agent-readable</span></span>
+    <aside className="w-[310px] shrink-0 flex flex-col border-r border-line bg-panel/30 overflow-hidden">
+      <div className="flex items-center justify-between px-3 h-10 border-b border-line">
+        <span className="text-[11px] font-semibold tracking-wider text-dim">STOREFRONT</span>
         <span className="flex items-center gap-1.5 text-[10px] font-semibold text-accent bg-accent/10 border border-accent/30 rounded px-1.5 py-0.5">
-          <Dot color="#0C55F7" pulse /> AI BUYER · Claude
+          <Dot c="#0C55F7" pulse /> AI BUYER
         </span>
       </div>
       <div className="flex-1 overflow-y-auto p-3 flex flex-col gap-2.5">
-        {PRODUCTS.map((p) => (
-          <div key={p.sku} className={`relative rounded-lg border bg-panel p-3 ${p.attacked ? 'border-bad' : 'border-line'}`}
-               style={p.attacked ? { boxShadow: '0 0 0 1px #FF4D4F, 0 0 22px -8px #FF4D4F' } : {}}>
-            {p.attacked && (
-              <div className="absolute -top-2 left-2 flex items-center gap-1.5 text-[9px] font-semibold text-bad bg-bg border border-bad/50 rounded px-1.5 py-0.5 tracking-wide">
-                <Dot color="#FF4D4F" pulse /> ATTACK 7 · AUTHORITY WIDENING AT A HOP
+        {PRODUCTS.map((p) => {
+          const hit = targetSku === p.sku;
+          return (
+            <div key={p.sku} className={`relative rounded-lg border bg-panel p-3 ${hit?'border-bad':'border-line'}`}
+                 style={hit?{boxShadow:'0 0 0 1px #FF4D4F, 0 0 22px -8px #FF4D4F'}:{}}>
+              {hit && <div className="absolute -top-2 left-2 text-[9px] font-semibold text-bad bg-bg border border-bad/50 rounded px-1.5 py-0.5">UNDER ATTACK</div>}
+              <div className="h-16 rounded-md mb-2.5 border border-line/60"
+                   style={{background:'radial-gradient(120% 100% at 30% 20%, #2a3242 0%, #1a1f2b 55%, #12151c 100%)'}} />
+              <div className="flex items-baseline justify-between">
+                <div>
+                  <div className="text-[13px] font-semibold leading-tight">{p.name}</div>
+                  <div className="text-[10px] text-faint font-mono">{p.sku} · {p.cat}</div>
+                </div>
+                <div className="text-[14px] font-semibold tnum">{rupee(p.price)}</div>
               </div>
-            )}
-            <div className="h-20 rounded-md mb-2.5 border border-line/60"
-                 style={{ background: 'radial-gradient(120% 100% at 30% 20%, #2a3242 0%, #1a1f2b 55%, #12151c 100%)' }} />
-            <div className="flex items-baseline justify-between">
-              <div>
-                <div className="text-[13px] font-semibold leading-tight">{p.name}</div>
-                <div className="text-[10px] text-faint font-mono">{p.sku}</div>
-              </div>
-              <div className="text-[15px] font-semibold tnum">{rupee(p.price)}</div>
+              <button onClick={() => onBuy(p.sku)} disabled={busy}
+                className="mt-2.5 w-full h-7 rounded border border-accent/40 bg-accent/10 hover:bg-accent/20 disabled:opacity-40 text-accent text-[11px] font-semibold">
+                Buy as AI agent
+              </button>
             </div>
-            <div className="mt-2 flex items-center justify-between text-[10px]">
-              <span className="text-dim">stock <b className="text-txt tnum">{p.stock}</b></span>
-              <span className="text-faint font-mono">in-app checkout</span>
-            </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
       <div className="border-t border-line p-3 text-[10px] font-mono leading-relaxed text-dim">
-        <div className="text-faint mb-1">mandate in flight</div>
-        issuer <span className="text-accent">→</span> buyer-agent <span className="text-accent">→</span> sub-agent:buyer-2<br/>
-        max <span className="text-txt">₹1,200</span> · scope <span className="text-txt">sku_tote</span> · exp <span className="text-warn">09:52</span>
+        <div className="text-faint mb-1">delegation in flight</div>
+        human <span className="text-accent">→</span> assistant <span className="text-accent">→</span> tool<br/>
+        authority narrows at every hop
       </div>
     </aside>
   );
 }
 
-function StageIcon({ status }) {
-  if (status === 'pass') return <span className="text-ok text-sm">✓</span>;
-  if (status === 'fail' || status === 'refuse') return <span className="text-bad text-sm">✕</span>;
-  return <span className="text-faint text-sm">·</span>;
-}
-
-function Pipeline() {
+/* ── Verification pipeline (the glass box) ────────────────────────────────── */
+function Pipeline({ verdict, label, busy }) {
   return (
-    <section className="flex-1 min-w-[440px] flex flex-col border-r border-line overflow-hidden">
-      <div className="flex items-center gap-2 px-4 h-10 border-b border-line">
+    <section className="flex-1 min-w-[420px] flex flex-col border-r border-line overflow-hidden">
+      <div className="flex items-center gap-2 px-3 h-10 border-b border-line">
         <span className="text-[11px] font-semibold tracking-wider text-dim">VERIFICATION PIPELINE</span>
-        <span className="text-[10px] text-faint">glass box · every check on screen</span>
+        <span className="text-[10px] text-faint">every check, real evidence</span>
         <div className="flex-1" />
-        <span className="text-[10px] font-mono text-faint">doc_01HZY9P4</span>
-        <span className="text-[10px] font-semibold text-bad bg-bad/10 border border-bad/30 rounded px-1.5 py-0.5">attack #07</span>
+        {label && <span className="text-[10px] font-mono text-faint">{label}</span>}
       </div>
-      <div className="flex-1 overflow-y-auto p-3 flex flex-col gap-2">
-        {STAGES.map((s) => {
-          const active = s.status === 'pass' || s.status === 'fail' || s.status === 'refuse';
-          const edge = s.status === 'pass' ? '#00D26A' : (s.status === 'fail' || s.status === 'refuse') ? '#FF4D4F' : '#1F232E';
-          if (s.status === 'refuse') {
-            return (
-              <div key={s.n} className="rounded-lg border border-bad/40 bg-bad/[0.06] p-3" style={{ borderLeft: '2px solid #FF4D4F' }}>
-                <div className="flex items-center gap-2 mb-2">
-                  <span className="w-5 h-5 rounded flex items-center justify-center text-[11px] font-semibold bg-bad/15 text-bad">{s.n}</span>
-                  <span className="text-[13px] font-semibold">Verdict</span>
-                  <span className="ml-1 text-[10px] font-semibold text-bad bg-bad/15 border border-bad/40 rounded px-1.5 py-0.5">✕ REFUSE</span>
-                  <div className="flex-1" />
-                  <span className="text-[10px] font-mono text-faint">HTTP 403 · ledger seq #48 appended · no Razorpay call made</span>
-                </div>
-                <p className="text-[12.5px] leading-relaxed text-txt/90 pl-7">{s.reason}</p>
-              </div>
-            );
-          }
-          return (
-            <div key={s.n} className="relative rounded-lg border bg-panel p-3" style={{ borderColor: '#1F232E', borderLeft: `2px solid ${edge}` }}>
-              <div className="flex items-center gap-2">
-                <span className="w-5 h-5 rounded flex items-center justify-center text-[11px] font-semibold"
-                      style={{ background: s.status === 'pass' ? 'rgba(0,210,106,.14)' : 'rgba(255,77,79,.14)', color: edge }}>{s.n}</span>
-                <span className="text-[12.5px] font-semibold">{s.name}</span>
-                {s.badge && (
-                  <button className="ml-1 text-[9px] font-semibold text-ok bg-ok/10 border border-ok/30 rounded px-1.5 py-0.5 hover:bg-ok/20 cursor-pointer" title="Enforced by tests/test_no_llm_in_policy.py — build fails if the money path imports a model client">
-                    {s.badge}
-                  </button>
-                )}
-                <div className="flex-1" />
-                <span className="text-[10px] font-mono text-faint tnum">{s.ms}</span>
-                <StageIcon status={s.status} />
-              </div>
-              <div className="mt-2 ml-7 font-mono text-[11px] leading-relaxed rounded bg-bg/60 border border-line/60 p-2 text-dim overflow-x-auto">
-                {s.json.map((l, i) => (
-                  <div key={i} className={i === s.json.length - 1 && s.status === 'fail' ? 'text-bad' : ''}>{l}</div>
-                ))}
-              </div>
-              <div className="mt-1.5 ml-7 text-[11px] font-mono" style={{ color: edge }}>
-                {s.status === 'pass' ? '→ ' : '✕ '}{s.note}
-              </div>
-            </div>
-          );
-        })}
-      </div>
-      <div className="border-t border-line px-3 py-2">
-        <div className="text-[10px] font-semibold tracking-wider text-faint mb-1.5">PREVIOUS DECISIONS</div>
-        <div className="flex flex-col gap-1 font-mono text-[10.5px]">
-          <div className="flex items-center gap-2"><span className="text-faint">doc_01HZY8K2</span><span className="text-dim">attack #06 · expiry extension at hop</span><div className="flex-1"/><span className="text-faint">8.71 ms</span><span className="text-bad font-semibold">REFUSE</span></div>
-          <div className="flex items-center gap-2"><span className="text-faint">doc_01HZY7J9</span><span className="text-dim">buyer-agent · sku_mug ×2 · ₹900</span><div className="flex-1"/><span className="text-faint">0.66 ms</span><span className="text-ok font-semibold">ALLOW</span></div>
+
+      {!verdict ? (
+        <div className="flex-1 flex items-center justify-center text-[12px] text-faint px-8 text-center">
+          {busy ? 'Running…' : 'Buy something, or select an attack, to watch the gateway decide.'}
         </div>
-      </div>
+      ) : (
+        <>
+          <div className="flex-1 overflow-y-auto p-3 flex flex-col gap-1.5">
+            {verdict.steps.map((s, i) => {
+              const edge = s.passed ? '#00D26A' : '#FF4D4F';
+              const ev = s.evidence && Object.keys(s.evidence).length ? JSON.stringify(s.evidence) : null;
+              return (
+                <div key={i} className="rounded-md border bg-panel px-3 py-2 rowin"
+                     style={{ borderColor:'#1F232E', borderLeft:`2px solid ${edge}` }}>
+                  <div className="flex items-center gap-2">
+                    <span className="w-4 h-4 rounded flex items-center justify-center text-[10px] font-bold"
+                          style={{background:s.passed?'rgba(0,210,106,.14)':'rgba(255,77,79,.14)',color:edge}}>
+                      {s.passed ? '✓' : '✕'}
+                    </span>
+                    <span className="text-[12px] font-mono font-semibold">{s.name}</span>
+                    <div className="flex-1" />
+                    <span className="text-[10px] font-mono text-faint tnum">{s.duration_us}µs</span>
+                  </div>
+                  <div className="mt-1 ml-6 text-[11.5px] leading-snug" style={{color:s.passed?'#8B8F99':edge}}>{s.detail}</div>
+                  {ev && <div className="mt-1 ml-6 font-mono text-[10px] text-faint break-all bg-bg/60 border border-line/60 rounded px-2 py-1">{ev}</div>}
+                </div>
+              );
+            })}
+          </div>
+          <div className={`border-t p-3 ${verdict.allowed?'border-ok/30 bg-ok/[0.05]':'border-bad/30 bg-bad/[0.05]'}`}>
+            <div className="flex items-center gap-2 mb-1">
+              <span className="text-[11px] font-bold px-2 py-0.5 rounded"
+                    style={{color:verdict.allowed?'#00D26A':'#FF4D4F',background:verdict.allowed?'rgba(0,210,106,.14)':'rgba(255,77,79,.14)'}}>
+                {verdict.allowed ? '✓ ALLOW' : '✕ REFUSE'}
+              </span>
+              <span className="text-[11px] font-mono text-dim">{verdict.reason_code}</span>
+              <div className="flex-1" />
+              <span className="text-[10px] font-semibold text-ok bg-ok/10 border border-ok/30 rounded px-1.5 py-0.5"
+                    title="tests/test_no_llm_in_policy.py fails the build if the money path imports a model client">
+                NO LLM · CI-ENFORCED
+              </span>
+            </div>
+            <p className="text-[12px] leading-relaxed text-txt/90">{verdict.explanation}</p>
+          </div>
+        </>
+      )}
     </section>
   );
 }
 
-function Scoreboard({ states, onRun, running }) {
-  const contained = states.filter((s) => s === 'contained').length;
+/* ── Attack scoreboard ────────────────────────────────────────────────────── */
+function Scoreboard({ attacks, onRunAll, onPick, running, selected, summary }) {
+  const contained = attacks.filter(a => a.status === 'contained').length;
   return (
-    <section className="w-[380px] shrink-0 flex flex-col border-r border-line overflow-hidden">
-      <div className="flex items-center gap-2 px-4 h-10 border-b border-line">
-        <span className="text-[11px] font-semibold tracking-wider text-dim">ATTACK SCOREBOARD</span>
-        <span className="text-[10px] text-faint">adversarial corpus v14</span>
+    <section className="w-[350px] shrink-0 flex flex-col border-r border-line overflow-hidden">
+      <div className="flex items-center gap-2 px-3 h-10 border-b border-line">
+        <span className="text-[11px] font-semibold tracking-wider text-dim">ATTACK CORPUS</span>
         <div className="flex-1" />
-        <span className="text-[11px] font-semibold tnum text-txt">{contained}/16</span>
+        <span className="text-[11px] font-semibold tnum">{contained}/{attacks.length}</span>
       </div>
-      <div className="flex-1 overflow-y-auto px-2 py-1.5">
-        {ATTACKS.map((a, i) => {
-          const st = states[i];
-          const famColor = { A: '#0C55F7', B: '#8B5CF6', C: '#00B8D4', D: '#FFB020' }[a.fam];
+      <div className="flex-1 overflow-y-auto px-1.5 py-1.5">
+        {attacks.map((a) => {
+          const c = FAMC[a.family] || '#8B8F99';
+          const sel = selected === a.attack_id;
           return (
-            <div key={a.id} className={`flex items-center gap-2.5 px-2 py-[7px] rounded ${st !== 'pending' ? 'rowin' : ''} ${st === 'progress' ? 'bg-warn/[0.06]' : ''}`}>
-              <span className="text-[10px] font-mono text-faint w-7 tnum">{a.id}</span>
+            <button key={a.attack_id} onClick={() => onPick(a.attack_id)}
+              className={`w-full flex items-center gap-2 px-2 py-[7px] rounded text-left hover:bg-panel2 ${sel?'bg-accent/10 border border-accent/40':'border border-transparent'}`}>
+              <span className="text-[10px] font-mono text-faint w-7 tnum">{a.attack_id}</span>
               <span className="w-4 h-4 rounded flex items-center justify-center text-[9px] font-bold shrink-0"
-                    style={{ background: famColor + '22', color: famColor }}>{a.fam}</span>
-              <span className={`text-[12px] flex-1 truncate ${st === 'pending' ? 'text-faint' : 'text-txt'}`}>{a.name}</span>
-              {st === 'contained' && <span className="flex items-center gap-1 text-[10px] font-semibold text-ok"><span>✓</span>CONTAINED</span>}
-              {st === 'progress' && <span className="flex items-center gap-1 text-[10px] font-semibold text-warn"><Dot color="#FFB020" pulse />IN PROGRESS</span>}
-              {st === 'pending' && <span className="text-[10px] font-semibold text-faint">PENDING</span>}
-            </div>
+                    style={{background:c+'22',color:c}}>{a.family}</span>
+              <span className={`text-[11.5px] flex-1 truncate ${a.status==='pending'?'text-faint':'text-txt'}`}>{a.name}</span>
+              {a.status==='contained' && <span className="text-[9.5px] font-semibold text-ok">✓ CONTAINED</span>}
+              {a.status==='through' && <span className="text-[9.5px] font-semibold text-bad">✕ THROUGH</span>}
+              {a.status==='running' && <Dot c="#FFB020" pulse />}
+              {a.status==='pending' && <span className="text-[9.5px] font-semibold text-faint">PENDING</span>}
+            </button>
           );
         })}
       </div>
       <div className="border-t border-line p-3">
-        <div className="text-[10px] font-semibold tracking-wider text-faint mb-2">DIFFERENTIAL · SAME 16 ATTACKS</div>
+        <div className="text-[10px] font-semibold tracking-wider text-faint mb-2">DIFFERENTIAL · SAME CORPUS</div>
         <div className="grid grid-cols-3 gap-2 mb-3">
-          {[['SIEVE', '16/16', '#00D26A'], ['NAIVE', '6/16', '#FF4D4F'], ['RZP-MCP', '?/16', '#FFB020']].map(([k, v, c]) => (
-            <div key={k} className="rounded-md border p-2 text-center" style={{ borderColor: c + '40', background: c + '0d' }}>
-              <div className="text-[9px] font-semibold tracking-wide text-dim">{k}</div>
-              <div className="text-[15px] font-bold tnum" style={{ color: c }}>{v}</div>
+          {[['SIEVE', `${summary.sieve.contained}/${summary.sieve.total}`, '#00D26A'],
+            ['NAIVE', `${summary.naive.contained}/${summary.naive.total}`, '#FF4D4F'],
+            ['RZP-MCP', '—', '#FFB020']].map(([k,v,c]) => (
+            <div key={k} className="rounded-md border p-2 text-center" style={{borderColor:c+'40',background:c+'0d'}}>
+              <div className="text-[9px] font-semibold text-dim">{k}</div>
+              <div className="text-[15px] font-bold tnum" style={{color:c}}>{v}</div>
             </div>
           ))}
         </div>
-        <button onClick={onRun} disabled={running}
-          className="w-full h-9 rounded-md bg-accent hover:bg-accent/90 disabled:opacity-50 text-white text-[12.5px] font-semibold flex items-center justify-center gap-2 transition-colors">
+        <button onClick={onRunAll} disabled={running}
+          className="w-full h-9 rounded-md bg-accent hover:bg-accent/90 disabled:opacity-50 text-white text-[12.5px] font-semibold">
           {running ? 'RUNNING…' : '▶  RUN ALL ATTACKS'}
         </button>
       </div>
@@ -298,180 +275,112 @@ function Scoreboard({ states, onRun, running }) {
   );
 }
 
-function MerkleTree({ tampered }) {
-  const levels = [8, 4, 2, 1];
-  const badLeaf = 3;
-  const badSet = tampered ? { 0: new Set([badLeaf]), 1: new Set([1]), 2: new Set([0]), 3: new Set([0]) } : {};
-  return (
-    <div className="flex flex-col-reverse gap-3 items-center py-2">
-      {levels.map((count, li) => (
-        <div key={li} className="flex gap-2 justify-center">
-          {Array.from({ length: count }).map((_, i) => {
-            const bad = badSet[li] && badSet[li].has(i);
-            const c = bad ? '#FF4D4F' : '#00D26A';
-            return <span key={i} className={`w-2.5 h-2.5 rounded-full ${bad ? '' : 'pulse'}`}
-                         style={{ background: c, boxShadow: `0 0 7px ${c}`, animationDelay: `${i * 90}ms` }} />;
-          })}
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function LedgerPanel() {
-  const [tampered, setTampered] = useState(false);
+/* ── Right panel ──────────────────────────────────────────────────────────── */
+function LedgerPanel({ live, ledger, onTamper, tampered }) {
+  const bad = tampered && ledger.brokenSeq !== null && ledger.brokenSeq !== undefined;
   return (
     <div className="p-4 flex flex-col gap-4 overflow-y-auto">
-      <div className="flex items-center justify-between">
-        <span className="text-[11px] font-semibold tracking-wider text-dim">LEDGER INTEGRITY VERIFIER</span>
-      </div>
+      <span className="text-[11px] font-semibold tracking-wider text-dim">LEDGER INTEGRITY</span>
       <div className="font-mono text-[10.5px] text-dim leading-relaxed">
-        chain head <span className="text-txt">4b9c0…d286f6…</span><br/>
-        48 entries · re-hashed client-side in <span className="text-txt">3.1 ms</span>
+        chain head <span className="text-txt break-all">{(ledger.head||'—').slice(0,24)}…</span><br/>
+        {ledger.entries} entries · re-hashed on demand
       </div>
-      <div className={`rounded-lg border p-4 text-center ${tampered ? 'border-bad/50 bg-bad/[0.06]' : 'border-ok/40 bg-ok/[0.06]'}`}>
-        {tampered ? (
-          <>
-            <div className="text-2xl font-bold text-bad tracking-tight">CORRUPTED ✕</div>
-            <div className="text-[10.5px] text-dim mt-1">root ≠ recomputed root · 1 leaf mismatch</div>
-          </>
-        ) : (
-          <>
-            <div className="text-2xl font-bold text-ok tracking-tight">VERIFIED ✓</div>
-            <div className="text-[10.5px] text-dim mt-1">root = recomputed root · 0 mismatches</div>
-          </>
-        )}
+      <div className={`rounded-lg border p-4 text-center ${bad?'border-bad/50 bg-bad/[0.06]':'border-ok/40 bg-ok/[0.06]'}`}>
+        <div className={`text-2xl font-bold tracking-tight ${bad?'text-bad':'text-ok'}`}>{bad?'CORRUPTED ✕':'VERIFIED ✓'}</div>
+        <div className="text-[10.5px] text-dim mt-1">{bad?'recomputed root ≠ stored root':'every entry re-hashes to its stored value'}</div>
       </div>
-      <div>
-        <div className="text-[10px] font-semibold tracking-wider text-faint mb-1">MERKLE ROOT <span className="font-mono font-normal text-faint">seq #41–#48</span></div>
-        <MerkleTree tampered={tampered} />
-        {tampered && (
-          <div className="mt-1 rounded border border-bad/40 bg-bad/[0.06] p-2 font-mono text-[10px] text-bad leading-relaxed">
-            ↳ sequence #47 — hash mismatch<br/>
-            &nbsp;&nbsp;stored 4c1c…09af · recomputed 9d3d…77a3<br/>
-            &nbsp;&nbsp;amount field altered 1200 → 120000
-          </div>
-        )}
-      </div>
+      {bad && (
+        <div className="rounded border border-bad/40 bg-bad/[0.06] p-2 font-mono text-[10px] text-bad leading-relaxed break-all">
+          ↳ {ledger.detail}
+        </div>
+      )}
       <label className="flex items-center justify-between rounded-md border border-line bg-panel2 px-3 py-2.5 cursor-pointer">
         <span className="text-[12px] font-medium">Simulate tampering</span>
-        <span onClick={() => setTampered((t) => !t)}
-              className={`relative w-9 h-5 rounded-full transition-colors ${tampered ? 'bg-bad' : 'bg-line'}`}>
-          <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-all ${tampered ? 'left-[18px]' : 'left-0.5'}`} />
+        <span onClick={onTamper} className={`relative w-9 h-5 rounded-full transition-colors ${tampered?'bg-bad':'bg-line'}`}>
+          <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-all ${tampered?'left-[18px]':'left-0.5'}`} />
         </span>
       </label>
+      <p className="text-[10.5px] text-dim leading-relaxed border-t border-line pt-2">
+        Tamper-<b>evident</b>, not tamper-proof: rewriting the whole chain forward is still possible
+        with database write access. External anchoring is the production requirement — see LIMITS.md.
+      </p>
     </div>
   );
 }
 
-function ConcurrencyPanel() {
-  const rows = Array.from({ length: 10 }, (_, i) => {
-    const start = 2 + i * 3.4 + (i % 3);
-    const width = 30 - i * 0.6;
-    return { id: 'r' + String(i + 1).padStart(2, '0'), start, width, winner: i === 0 };
-  });
-  return (
-    <div className="p-4 flex flex-col gap-3 overflow-y-auto">
-      <span className="text-[11px] font-semibold tracking-wider text-dim">CONCURRENCY VISUALISER</span>
-      <div className="font-mono text-[10.5px] text-dim">attack #13 · 10 × POST /v1/pay · same idempotency key</div>
-      <div className="rounded-md border border-ok/30 bg-ok/[0.06] px-3 py-2 text-[11px] font-semibold text-ok text-center">
-        1 winner · 9 idempotent replays
-      </div>
-      <div className="flex flex-col gap-1.5 pt-1">
-        {rows.map((r) => (
-          <div key={r.id} className="flex items-center gap-2">
-            <span className="text-[9px] font-mono text-faint w-6">{r.id}</span>
-            <div className="flex-1 h-4 relative rounded bg-bg border border-line/50 overflow-hidden">
-              <div className="absolute top-0 bottom-0 rounded-sm flex items-center justify-end pr-1"
-                   style={{ left: r.start + '%', width: r.width + '%',
-                            background: r.winner ? 'linear-gradient(90deg,#00D26A55,#00D26A)' : '#2a3140' }}>
-                {r.winner && <span className="text-[8px] font-bold text-bg">201 paid</span>}
-              </div>
-            </div>
-            <span className={`text-[9px] font-mono w-14 text-right ${r.winner ? 'text-ok font-semibold' : 'text-faint'}`}>
-              {r.winner ? 'winner' : '200 replay'}
-            </span>
-          </div>
-        ))}
-      </div>
-      <div className="flex justify-between text-[9px] font-mono text-faint px-8">
-        <span>t=0 ms</span><span>t=46 ms</span>
-      </div>
-      <div className="text-[10.5px] text-dim leading-relaxed border-t border-line pt-2">
-        One Razorpay order created. Nine callers received the same order from the ledger — not a second charge.
-        <div className="font-mono text-faint mt-1">UNIQUE(mandate_id, idem_key) · SQLite WAL</div>
-      </div>
-    </div>
-  );
-}
-
-function DifferentialPanel() {
-  const cols = [
-    { k: 'NAIVE', verdict: 'ALLOWED', c: '#FF4D4F', reason: 'Checks only the leaf mandate’s amount cap. Never walks the chain, so a widened capability slips through.' },
-    { k: 'SIEVE', verdict: 'BLOCKED', c: '#00D26A', reason: 'Narrowing invariant enforced per hop. "refund" ∉ parent’s grant → refused before any money moves.' },
-    { k: 'RZP-MCP', verdict: '—', c: '#FFB020', reason: 'Raw payment API, no delegation layer. Not built to check this — it’s what needs a bounds layer in front.' },
+function DifferentialPanel({ summary }) {
+  const rows = [
+    { k:'NAIVE', v:`${summary.naive.contained}/${summary.naive.total} contained`, c:'#FF4D4F',
+      r:'Checks only the leaf mandate and a per-order cap. Misses every delegation-chain attack — and refuses ~1 in 6 honest retries as replays.' },
+    { k:'SIEVE', v:`${summary.sieve.contained}/${summary.sieve.total} contained`, c:'#00D26A',
+      r:'Walks the whole chain, enforces narrowing per hop, recomputes every total from the catalog, and separates a replay attack from an honest retry.' },
+    { k:'RAZORPAY MCP', v:'not comparable', c:'#FFB020',
+      r:'A raw payment API with no delegation layer — it assumes the calling agent is trusted. It is what needs a bounds layer in front, not a competitor.' },
   ];
   return (
     <div className="p-4 flex flex-col gap-3 overflow-y-auto">
-      <span className="text-[11px] font-semibold tracking-wider text-dim">DIFFERENTIAL · ATTACK #07</span>
-      <div className="font-mono text-[10.5px] text-dim">authority widening at a hop — same input, three gateways</div>
-      <div className="flex flex-col gap-2.5 pt-1">
-        {cols.map((c) => (
-          <div key={c.k} className="rounded-lg border p-3" style={{ borderColor: c.c + '40', background: c.c + '0a' }}>
-            <div className="flex items-center justify-between mb-1.5">
-              <span className="text-[12px] font-semibold">{c.k}</span>
-              <span className="text-[11px] font-bold px-2 py-0.5 rounded" style={{ color: c.c, background: c.c + '1a' }}>{c.verdict}</span>
-            </div>
-            <p className="text-[11.5px] leading-relaxed text-dim">{c.reason}</p>
+      <span className="text-[11px] font-semibold tracking-wider text-dim">DIFFERENTIAL</span>
+      <div className="font-mono text-[10.5px] text-dim">same corpus, same inputs, three gateways</div>
+      {rows.map(x => (
+        <div key={x.k} className="rounded-lg border p-3" style={{borderColor:x.c+'40',background:x.c+'0a'}}>
+          <div className="flex items-center justify-between mb-1.5">
+            <span className="text-[12px] font-semibold">{x.k}</span>
+            <span className="text-[10.5px] font-bold px-2 py-0.5 rounded" style={{color:x.c,background:x.c+'1a'}}>{x.v}</span>
           </div>
-        ))}
+          <p className="text-[11.5px] leading-relaxed text-dim">{x.r}</p>
+        </div>
+      ))}
+      <div className="rounded-lg border border-line bg-panel2 p-3">
+        <div className="text-[10px] font-semibold tracking-wider text-faint mb-1">FALSE REFUSALS</div>
+        <p className="text-[11.5px] text-dim leading-relaxed">
+          SIEVE <b className="text-ok">{summary.falseRefusal.n}/{summary.falseRefusal.total}</b>
+          {' '}({summary.falseRefusal.lo}–{summary.falseRefusal.hi}% 95% CI) · naive <b className="text-bad">161/1000</b>.
+          Containment without this number is meaningless — a gateway that refuses everyone contains everything.
+        </p>
       </div>
     </div>
   );
 }
 
-function RightPanel() {
+function RightPanel(props) {
   const [mode, setMode] = useState('ledger');
-  const tabs = [['ledger', 'Ledger'], ['concurrency', 'Concurrency'], ['differential', 'Differential']];
   return (
-    <aside className="w-[320px] shrink-0 flex flex-col bg-panel/30 overflow-hidden">
+    <aside className="w-[300px] shrink-0 flex flex-col bg-panel/30 overflow-hidden">
       <div className="flex items-center gap-1 px-2 h-10 border-b border-line">
-        {tabs.map(([k, label]) => (
-          <button key={k} onClick={() => setMode(k)}
-            className={`text-[11px] font-semibold px-2.5 py-1 rounded transition-colors ${mode === k ? 'text-txt bg-accent/15 border border-accent/40' : 'text-dim hover:text-txt border border-transparent'}`}>
-            {label}
-          </button>
+        {[['ledger','Ledger'],['differential','Differential']].map(([k,l]) => (
+          <button key={k} onClick={()=>setMode(k)}
+            className={`text-[11px] font-semibold px-2.5 py-1 rounded ${mode===k?'text-txt bg-accent/15 border border-accent/40':'text-dim border border-transparent hover:text-txt'}`}>{l}</button>
         ))}
       </div>
       <div className="flex-1 overflow-hidden">
-        {mode === 'ledger' && <LedgerPanel />}
-        {mode === 'concurrency' && <ConcurrencyPanel />}
-        {mode === 'differential' && <DifferentialPanel />}
+        {mode==='ledger' ? <LedgerPanel {...props} /> : <DifferentialPanel summary={props.summary} />}
       </div>
     </aside>
   );
 }
 
-const EV_COLOR = { ALLOW: '#00D26A', REFUSE: '#FF4D4F', PROV: '#8B8F99' };
-function SSEStrip({ lines }) {
+/* ── SSE strip ────────────────────────────────────────────────────────────── */
+const EVC = { ALLOW:'#00D26A', REFUSE:'#FF4D4F', PROV:'#8B8F99' };
+function SSEStrip({ lines, live }) {
   const ref = useRef(null);
   useEffect(() => { if (ref.current) ref.current.scrollTop = ref.current.scrollHeight; }, [lines]);
   return (
-    <footer className="h-[132px] shrink-0 border-t border-line bg-panel/40 flex flex-col">
+    <footer className="h-[122px] shrink-0 border-t border-line bg-panel/40 flex flex-col">
       <div className="flex items-center gap-2 px-4 h-8 border-b border-line/60">
         <span className="text-[11px] font-semibold tracking-wider text-dim">DECISION TRACE</span>
-        <span className="text-[10px] font-mono text-faint">GET /v1/trace · text/event-stream</span>
+        <span className="text-[10px] font-mono text-faint">{live ? 'GET /v1/trace · text/event-stream' : 'recorded'}</span>
         <div className="flex-1" />
-        <span className="flex items-center gap-1.5 text-[10px] text-ok"><Dot color="#00D26A" pulse /> streaming</span>
+        {live && <span className="flex items-center gap-1.5 text-[10px] text-ok"><Dot c="#00D26A" pulse /> streaming</span>}
       </div>
       <div ref={ref} className="flex-1 overflow-y-auto px-4 py-1.5 font-mono text-[11px] leading-[1.5]">
-        {lines.map((l, i) => (
+        {lines.length === 0 && <div className="text-faint">waiting for decisions…</div>}
+        {lines.map((l,i) => (
           <div key={i} className="flex items-center gap-3 rowin">
             <span className="text-faint tnum">{l.t}</span>
-            <span className="w-40" style={{ color: l.v === 'REFUSE' ? '#FF4D4F' : l.v === 'ALLOW' ? '#00D26A' : '#8B8F99' }}>{l.ev}</span>
+            <span className="w-40 shrink-0" style={{color:EVC[l.v]||'#8B8F99'}}>{l.ev}</span>
             <span className="text-faint">sha256:{l.hash}</span>
-            <div className="flex-1" />
-            <span className="text-[10px] font-semibold px-1.5 rounded" style={{ color: EV_COLOR[l.v], background: EV_COLOR[l.v] + '18' }}>{l.v}</span>
+            <span className="text-faint truncate flex-1">{l.detail}</span>
+            <span className="text-[10px] font-semibold px-1.5 rounded shrink-0" style={{color:EVC[l.v],background:(EVC[l.v]||'#8B8F99')+'18'}}>{l.v}</span>
           </div>
         ))}
       </div>
@@ -479,47 +388,136 @@ function SSEStrip({ lines }) {
   );
 }
 
+/* ── App ──────────────────────────────────────────────────────────────────── */
 function App() {
-  const initStates = ATTACKS.map((_, i) => i < 6 ? 'contained' : i === 6 ? 'progress' : 'pending');
-  const [states, setStates] = useState(initStates);
+  const [live, setLive] = useState(false);
+  const [attacks, setAttacks] = useState(RECORDED_ATTACKS.map(a => ({...a, status:'pending'})));
+  const [summary, setSummary] = useState(RECORDED_SUMMARY);
+  const [verdict, setVerdict] = useState(null);
+  const [label, setLabel] = useState('');
+  const [selected, setSelected] = useState(null);
+  const [targetSku, setTargetSku] = useState(null);
   const [running, setRunning] = useState(false);
-  const [sse, setSse] = useState(INIT_SSE);
-  const contained = states.filter((s) => s === 'contained').length;
+  const [busy, setBusy] = useState(false);
+  const [sse, setSse] = useState([]);
+  const [ledger, setLedger] = useState({ head:'', entries:0, brokenSeq:null, detail:'' });
+  const [tampered, setTampered] = useState(false);
 
-  const pushSse = useCallback((ev, v) => {
-    setSse((prev) => [...prev.slice(-40), { t: now(), ev, hash: rndHash(), v }]);
+  // Detect a real gateway behind the page; fall back to the recorded run.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const r = await fetch('/v1/health');
+        if (!r.ok) throw new Error('no gateway');
+        if (cancelled) return;
+        setLive(true);
+        const list = await (await fetch('/v1/attacks')).json();
+        setAttacks(list.map(a => ({ attack_id:a.attack_id, name:a.name, family:a.attack_id[0], status:'pending' })));
+        const led = await (await fetch('/v1/ledger')).json();
+        setLedger({ head: led.integrity.head_hash, entries: led.integrity.entries_checked, brokenSeq:null, detail:'' });
+      } catch (e) { /* recorded mode */ }
+    })();
+    return () => { cancelled = true; };
   }, []);
 
-  // ambient trace stream
+  // Live trace stream.
   useEffect(() => {
-    const evs = [['MANDATE_VERIFIED', 'ALLOW'], ['POLICY_ALLOWED', 'ALLOW'], ['LEDGER_APPENDED', 'PROV'], ['CHECKOUT_SETTLED', 'ALLOW']];
-    const id = setInterval(() => { const [ev, v] = evs[Math.floor(Math.random() * evs.length)]; pushSse(ev, v); }, 2600);
-    return () => clearInterval(id);
-  }, [pushSse]);
-
-  const runAll = useCallback(() => {
-    if (running) return;
-    setRunning(true);
-    let i = 6;
-    const step = () => {
-      setStates((prev) => { const n = [...prev]; if (i < 16) n[i] = 'contained'; return n; });
-      pushSse(i === 6 ? 'POLICY_REFUSED' : ['MANDATE_VERIFIED', 'POLICY_REFUSED', 'LEDGER_APPENDED'][i % 3], i % 3 === 1 || i === 6 ? 'REFUSE' : 'PROV');
-      i += 1;
-      if (i < 16) { setTimeout(step, 230); } else { setRunning(false); }
+    if (!live) return;
+    const es = new EventSource('/v1/trace');
+    es.onmessage = (m) => {
+      try { const d = JSON.parse(m.data); setSse(p => [...p.slice(-60), d]); } catch (e) {}
     };
-    setTimeout(step, 200);
-  }, [running, pushSse]);
+    return () => es.close();
+  }, [live]);
+
+  const buy = useCallback(async (sku) => {
+    setTargetSku(null); setSelected(null); setBusy(true);
+    setLabel(`purchase · ${sku}`);
+    if (!live) {
+      setVerdict({ allowed:true, reason_code:'allowed',
+        explanation:'Authorised — recorded run. Start the SIEVE server to decide live.',
+        steps: RECORDED_B7.steps.slice(0,8).map(s => ({...s, passed:true})) });
+      setBusy(false); return;
+    }
+    try {
+      const v = await (await fetch(`/v1/purchase?sku=${encodeURIComponent(sku)}`, {method:'POST'})).json();
+      setVerdict(v);
+      const led = await (await fetch('/v1/ledger')).json();
+      setLedger(l => ({...l, head: led.integrity.head_hash, entries: led.integrity.entries_checked}));
+    } catch (e) {}
+    setBusy(false);
+  }, [live]);
+
+  const pick = useCallback(async (id) => {
+    setSelected(id); setBusy(true); setLabel(`attack ${id}`);
+    setTargetSku(id === 'D13' ? 'TRAILMUG' : id.startsWith('B') ? 'TENT-2P' : null);
+    if (!live) { setVerdict(RECORDED_B7); setBusy(false); return; }
+    try {
+      const d = await (await fetch(`/v1/attack/${id}`, {method:'POST'})).json();
+      if (d.sieve) setVerdict(d.sieve);
+      else setVerdict({ allowed:false, reason_code: d.result.sieve.actual_reason,
+        explanation: d.result.sieve.detail, steps: [] });
+      setAttacks(p => p.map(a => a.attack_id===id
+        ? {...a, status: d.result.sieve.contained ? 'contained' : 'through'} : a));
+    } catch (e) {}
+    setBusy(false);
+  }, [live]);
+
+  const runAll = useCallback(async () => {
+    setRunning(true);
+    if (!live) {
+      for (let i = 0; i < attacks.length; i++) {
+        await new Promise(r => setTimeout(r, 110));
+        setAttacks(p => p.map((a,j) => j===i ? {...a, status:'contained'} : a));
+      }
+      setRunning(false); return;
+    }
+    setAttacks(p => p.map(a => ({...a, status:'running'})));
+    try {
+      const rep = await (await fetch('/v1/run-corpus', {method:'POST'})).json();
+      const S = 'SIEVE (reference)';
+      setAttacks(p => p.map(a => {
+        const row = rep.attacks[a.attack_id];
+        return row ? {...a, status: row[S].contained ? 'contained' : 'through'} : {...a, status:'pending'};
+      }));
+      const s = rep.summaries.find(x => x.target === S);
+      const n = rep.summaries.find(x => x.target !== S);
+      setSummary(v => ({...v,
+        sieve:{contained:s.contained, total:s.attacks_total},
+        naive:{contained:n.contained, total:n.attacks_total}}));
+    } catch (e) {}
+    setRunning(false);
+  }, [live, attacks.length]);
+
+  const toggleTamper = useCallback(async () => {
+    const next = !tampered;
+    setTampered(next);
+    if (!live) {
+      setLedger(l => ({...l, brokenSeq: next?4:null,
+        detail: next ? 'sequence #4 — body altered, stored hash no longer recomputes' : ''}));
+      return;
+    }
+    if (!next) { setLedger(l => ({...l, brokenSeq:null, detail:''})); return; }
+    try {
+      const d = await (await fetch('/v1/ledger/tamper-demo', {method:'POST'})).json();
+      setLedger(l => ({...l, brokenSeq: d.after.broken_at_seq, detail: d.after.detail}));
+    } catch (e) {}
+  }, [live, tampered]);
+
+  const contained = attacks.filter(a => a.status === 'contained').length;
 
   return (
     <div className="h-full flex flex-col bg-bg text-txt">
-      <StatusBar contained={contained} />
+      <StatusBar live={live} summary={summary} contained={contained} total={attacks.length} />
       <div className="flex-1 flex overflow-x-auto overflow-y-hidden">
-        <Storefront />
-        <Pipeline />
-        <Scoreboard states={states} onRun={runAll} running={running} />
-        <RightPanel />
+        <Storefront onBuy={buy} busy={busy} targetSku={targetSku} />
+        <Pipeline verdict={verdict} label={label} busy={busy} />
+        <Scoreboard attacks={attacks} onRunAll={runAll} onPick={pick}
+                    running={running} selected={selected} summary={summary} />
+        <RightPanel live={live} ledger={ledger} onTamper={toggleTamper} tampered={tampered} summary={summary} />
       </div>
-      <SSEStrip lines={sse} />
+      <SSEStrip lines={sse} live={live} />
     </div>
   );
 }
