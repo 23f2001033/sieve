@@ -171,3 +171,68 @@ that passes once has proven nothing.
 Ledger and idempotency have implementations but not yet their own dedicated test
 files — next, alongside the attack-corpus runner that turns these scattered
 tests into the single reproducible containment/false-refusal report.
+
+---
+
+## 2026-09-02 (later) — the corpus framework, and two bugs it caught in itself
+
+Built the corpus spine: a shared `World` that hands every attack a valid,
+signed baseline to corrupt; an `Attack` base that declares its expected outcome
+*before* any gateway runs; a runner that produces the attack×target matrix; and
+the naive baseline gateway. First real differential, on attack family A.
+
+### #5 — An attack that tested nothing, caught by the framework's own honesty check
+
+The framework distinguishes "contained" (the gateway refused) from
+"reason_expected" (it refused for the reason the attack targets). On the first
+run, attack A3 came back `contained=False` against SIEVE — SIEVE *allowed* it.
+
+The attack was a dud, not the gateway. A3 was meant to be a canonicalisation-
+confusion attack: mutate a field after signing and bet the verifier disagrees
+with the signer about the bytes. I had "mutated" a line item's category from
+outdoor to `books` — except the item I chose (MAP-IN) was *already* `books`, so
+the mutation changed nothing, the original signature stayed valid, and SIEVE
+correctly authorised an intent that wasn't actually tampered.
+
+This is precisely the failure mode the `reason_expected` split exists to catch:
+an attack that passes vacuously because it doesn't exercise what its author
+believed. Without that check it would have sat in the corpus as a green tick
+proving nothing.
+
+On reflection, canonicalisation confusion is not cleanly exploitable against
+*either* of these two gateways — both sign deterministically, and the classic
+JWT/XML canonicalisation attacks rely on parser ambiguity neither scheme has. So
+A3 was retired and replaced with a genuinely distinct, genuinely exploitable
+attack: **an intent presented with a valid delegation chain but signed by a key
+the chain never delegated to.** Holding a chain is not the same as being the
+agent it was delegated to. SIEVE binds the intent signature to the chain leaf
+and refuses; the naive gateway never checks intent authorship and accepts.
+
+### #6 — My baseline was broken in a way that flattered it
+
+With A3 fixed, a worse problem surfaced: the naive gateway was refusing *every*
+attack with `signature_invalid`, scoring a perfect — and meaningless — 4/4
+containment. The cause: I had it verify signatures over `json.dumps`, but SIEVE
+signs delegations over canonical binary. The naive gateway literally could not
+verify any signature SIEVE produced, so it rejected all input, honest traffic
+included. A gateway that refuses everyone "contains" every attack the way a
+brick contains a burglar.
+
+The fix reshaped the baseline into something fairer *and* stronger: it now
+verifies signatures **correctly**, with the same canonical scheme, and is naive
+only about *authorization logic* — which is exactly where the real competitors
+are naive. They use a crypto library correctly, check `amount <= cap`, and call
+it "bounded." Making the baseline crypto-correct means the attacks it lets
+through are lapses in authorization reasoning, not an inability to parse a
+signature. That is the more honest and more interesting differential, because
+authorization logic — chain narrowing, catalog recomputation, cumulative budget,
+intent-authorship binding — is SIEVE's actual contribution.
+
+Result on family A, and it is a real gap rather than a shutout: SIEVE contains
+4/4; the naive gateway contains A1 (single-threaded replay) and A4 (expired
+mandate) but lets A2 (total tampered after signing) and A3 (forged intent
+authorship) through as `allowed`.
+
+44 tests passing. Next: the remaining three attack families (delegation, budget/
+concurrency, data-plane), the seeded benign corpus for the false-refusal
+denominator, and the report formatter.

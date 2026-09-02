@@ -29,9 +29,11 @@ POLICY_MODULES = [
     "sieve/contracts/verdict.py",
     "sieve/gateway/crypto.py",
     "sieve/gateway/policy.py",
+    "sieve/gateway/gateway.py",
     "sieve/gateway/nonce.py",
     "sieve/gateway/idempotency.py",
     "sieve/gateway/ledger.py",
+    "sieve/gateway/inventory.py",
 ]
 
 # Model clients and inference libraries. Substring match on the top-level import
