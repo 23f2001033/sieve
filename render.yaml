@@ -1,0 +1,24 @@
+# Render blueprint — ONE instance, deliberately.
+#
+# numInstances is pinned to 1 because SIEVE's guarantees are single-node: the
+# idempotency claim is a UNIQUE insert against one SQLite file, the cumulative
+# budget uses an in-process lock, and the ledger is a single-writer hash chain.
+# Raising this number silently breaks exactly-once. See docs/LIMITS.md.
+services:
+  - type: web
+    name: sieve-gateway
+    runtime: docker
+    plan: free
+    numInstances: 1
+    healthCheckPath: /v1/health
+    envVars:
+      - key: GROQ_API_KEY
+        sync: false          # set in the Render dashboard, never committed
+      - key: GROQ_BASE_URL
+        value: https://api.groq.com/openai/v1
+      - key: GROQ_MODEL
+        value: openai/gpt-oss-120b
+      - key: RAZORPAY_KEY_ID
+        sync: false
+      - key: RAZORPAY_KEY_SECRET
+        sync: false

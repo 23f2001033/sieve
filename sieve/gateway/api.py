@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -27,6 +28,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from sse_starlette.sse import EventSourceResponse
 
 from sieve.contracts.trace import TraceEvent, events_for
+from sieve.gateway.ratelimit import RateLimiter
 from sieve.gateway.gateway import SieveGateway
 from sieve.gateway.idempotency import SqliteIdempotencyStore
 from sieve.gateway.inventory import Northlight, SystemClock
@@ -115,6 +117,11 @@ def create_app() -> FastAPI:
         allow_methods=["GET", "POST"],
         allow_headers=["*"],
     )
+
+    # Public demo: cap what a stranger can spend of the LLM budget and CPU.
+    # Disable locally with SIEVE_RATELIMIT=off.
+    app.add_middleware(RateLimiter,
+                       enabled=os.environ.get("SIEVE_RATELIMIT", "on") != "off")
 
     bus = Broadcaster()
     demo = Demo()

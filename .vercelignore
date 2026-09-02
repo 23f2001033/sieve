@@ -1,0 +1,15 @@
+# Vercel hosts ONLY the static console. The gateway is deliberately NOT deployed
+# here: its correctness (exactly-once idempotency, cumulative budget, the
+# single-writer hash chain) depends on one process against one disk, and
+# serverless gives neither. See docs/LIMITS.md. The backend belongs on a
+# single-instance host — Dockerfile and render.yaml are in the repo for that.
+sieve/
+tests/
+scripts/reproduce.py
+docs/
+_internal/
+.venv/
+pyproject.toml
+Dockerfile
+render.yaml
+*.db
