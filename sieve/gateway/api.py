@@ -125,6 +125,36 @@ def create_app() -> FastAPI:
         await emit(intent.to_body(), verdict)
         return JSONResponse(verdict.to_json())
 
+    @app.post("/v1/agent/shop")
+    async def agent_shop(goal: str = "Buy me a tent, and a mug if the budget allows."):
+        """Let the LLM buyer agent shop, under a bounded mandate it cannot widen.
+
+        Imported lazily: `sieve.agents` is a forbidden import for every module on
+        the money path, and keeping it out of this file's top-level imports keeps
+        that boundary obvious to a reader as well as to the test.
+        """
+        from fastapi.concurrency import run_in_threadpool
+
+        from sieve.agents.buyer import build_session
+
+        session = await run_in_threadpool(build_session)
+        run = await run_in_threadpool(session["agent"].run, goal)
+
+        for purchase in run.purchases:
+            verdict_json = purchase.get("verdict")
+            if not verdict_json:
+                continue
+            allowed = verdict_json.get("allowed")
+            await bus.publish(TraceEvent(
+                t=_now(),
+                ev="AGENT_PURCHASE_ALLOWED" if allowed else "AGENT_PURCHASE_REFUSED",
+                hash=(purchase.get("sku") or "")[:8].lower().ljust(8, "0"),
+                v="ALLOW" if allowed else "REFUSE",
+                detail=f"{purchase.get('sku')} x{purchase.get('quantity')} — "
+                       f"{verdict_json.get('reason_code')}",
+            ))
+        return JSONResponse(run.to_json())
+
     @app.get("/v1/attacks")
     async def attacks():
         """Corpus metadata, so the scoreboard can render the real attack set
