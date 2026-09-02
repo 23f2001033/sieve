@@ -33,6 +33,8 @@ from sieve.gateway.ledger import SqliteLedger
 from sieve.gateway.nonce import SqliteNonceStore
 from sieve.naive.gateway import NaiveGateway
 from sieve.suite.attacks import ALL_ATTACKS
+from sieve.suite.benign.cases import benign_corpus
+from sieve.suite.report import summary_json
 from sieve.suite.runner import run_corpus
 from sieve.suite.world import MERCHANT_ID, World
 
@@ -121,6 +123,13 @@ def create_app() -> FastAPI:
         verdict = demo.gateway.submit(intent)
         await emit(intent.to_body(), verdict)
         return JSONResponse(verdict.to_json())
+
+    @app.post("/v1/run-benign")
+    async def run_benign(count: int = 120):
+        """The false-refusal half of the metric. Separate from the attack run
+        because it is the slow one — the attack corpus stays snappy for the demo."""
+        report = run_corpus([], benign_corpus(count, seed=42))
+        return JSONResponse(summary_json(report))
 
     @app.post("/v1/run-corpus")
     async def run():
