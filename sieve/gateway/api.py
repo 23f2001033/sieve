@@ -161,6 +161,31 @@ def create_app() -> FastAPI:
             ))
         return JSONResponse(run.to_json())
 
+    @app.post("/v1/agent/redteam")
+    async def agent_redteam(probes: int = 6):
+        """Let the red-team agent hunt for holes the hand-written corpus missed.
+
+        Sandboxed by construction: it attacks a throwaway gateway with the payment
+        rail hard-wired off. `needs_review` counts probes the agent itself expected
+        to be refused that were allowed — candidates for human review, never
+        reported as confirmed vulnerabilities.
+        """
+        from fastapi.concurrency import run_in_threadpool
+
+        from sieve.agents.redteam import RedTeamAgent
+
+        agent = RedTeamAgent(max_probes=max(1, min(probes, 12)))
+        run = await run_in_threadpool(agent.run)
+
+        for probe in run.probes:
+            await bus.publish(TraceEvent(
+                t=_now(),
+                ev="REDTEAM_PROBE_ALLOWED" if probe.allowed else "REDTEAM_PROBE_REFUSED",
+                hash="redteam0", v="REFUSE" if not probe.allowed else "ALLOW",
+                detail=f"{probe.description[:60]} — {probe.reason}",
+            ))
+        return JSONResponse(run.to_json())
+
     @app.get("/v1/attacks")
     async def attacks():
         """Corpus metadata, so the scoreboard can render the real attack set

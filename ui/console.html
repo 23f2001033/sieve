@@ -342,18 +342,115 @@ function DifferentialPanel({ summary }) {
   );
 }
 
+function AgentPanel({ live }) {
+  const [goal, setGoal] = useState('Buy me a tent, and a mug if the budget allows.');
+  const [run, setRun] = useState(null);
+  const [red, setRed] = useState(null);
+  const [busy, setBusy] = useState('');
+
+  const shop = async () => {
+    if (!live) return;
+    setBusy('shop'); setRun(null); setRed(null);
+    try {
+      setRun(await (await fetch(`/v1/agent/shop?goal=${encodeURIComponent(goal)}`, {method:'POST'})).json());
+    } catch (e) { setRun({ summary: 'request failed', transcript: [], purchases: [] }); }
+    setBusy('');
+  };
+  const redteam = async () => {
+    if (!live) return;
+    setBusy('red'); setRun(null); setRed(null);
+    try {
+      setRed(await (await fetch('/v1/agent/redteam?probes=6', {method:'POST'})).json());
+    } catch (e) { setRed({ probes: [], probe_count: 0, needs_review_count: 0 }); }
+    setBusy('');
+  };
+
+  return (
+    <div className="p-3 flex flex-col gap-3 overflow-y-auto">
+      <span className="text-[11px] font-semibold tracking-wider text-dim">LLM AGENTS</span>
+      <p className="text-[10.5px] text-dim leading-relaxed">
+        The only place a model runs. It <b>proposes</b>; the deterministic gateway <b>disposes</b>.
+      </p>
+
+      <textarea value={goal} onChange={(e)=>setGoal(e.target.value)} rows={2}
+        className="w-full rounded border border-line bg-bg text-[11.5px] p-2 text-txt resize-none focus:outline-none focus:border-accent/60"
+        placeholder="What should the agent buy?" />
+
+      <div className="flex gap-2">
+        <button onClick={shop} disabled={!live || !!busy}
+          className="flex-1 h-8 rounded bg-accent hover:bg-accent/90 disabled:opacity-40 text-white text-[11px] font-semibold">
+          {busy==='shop' ? 'Shopping…' : 'Run buyer agent'}
+        </button>
+        <button onClick={redteam} disabled={!live || !!busy}
+          className="flex-1 h-8 rounded border border-bad/50 bg-bad/10 hover:bg-bad/20 disabled:opacity-40 text-bad text-[11px] font-semibold">
+          {busy==='red' ? 'Probing…' : 'Run red team'}
+        </button>
+      </div>
+      {!live && <p className="text-[10.5px] text-warn">Needs the gateway running — recorded page cannot call the model.</p>}
+
+      {run && (
+        <div className="flex flex-col gap-1.5">
+          <div className="text-[10px] font-semibold tracking-wider text-faint">TRANSCRIPT</div>
+          {run.transcript.map((e,i) => e.type === 'tool_call' ? (
+            <div key={i} className="rounded border border-line bg-panel px-2 py-1.5 font-mono text-[10px]">
+              <div className="text-accent">{e.tool}({JSON.stringify(e.args)})</div>
+              {'allowed' in (e.result||{}) && (
+                <div className={e.result.allowed ? 'text-ok' : 'text-bad'}>
+                  → {e.result.allowed ? `ALLOW ${e.result.charged||''}` : `REFUSE ${e.result.reason}`}
+                </div>
+              )}
+            </div>
+          ) : (
+            <div key={i} className="rounded border border-line/60 bg-panel2 px-2 py-1.5 text-[11px] text-dim leading-snug">{e.text}</div>
+          ))}
+          {run.summary && (
+            <div className="rounded border border-accent/30 bg-accent/[0.06] px-2 py-1.5 text-[11px] leading-snug mt-1">{run.summary}</div>
+          )}
+        </div>
+      )}
+
+      {red && (
+        <div className="flex flex-col gap-1.5">
+          <div className="flex items-center justify-between">
+            <span className="text-[10px] font-semibold tracking-wider text-faint">RED-TEAM PROBES</span>
+            <span className={`text-[10px] font-semibold ${red.needs_review_count ? 'text-warn' : 'text-ok'}`}>
+              {red.probe_count} probes · {red.needs_review_count} need review
+            </span>
+          </div>
+          {(red.probes||[]).map((p,i) => (
+            <div key={i} className={`rounded border px-2 py-1.5 text-[10px] leading-snug ${p.needs_review?'border-warn/50 bg-warn/[0.07]':'border-line bg-panel'}`}>
+              <div className="text-dim">{p.description}</div>
+              <div className={p.allowed ? (p.needs_review?'text-warn':'text-ok') : 'text-ok'}>
+                expected {p.expectation} → {p.allowed ? 'ALLOWED' : `refused (${p.reason})`}
+                {p.needs_review && ' ← REVIEW'}
+              </div>
+            </div>
+          ))}
+          <p className="text-[10px] text-dim leading-relaxed border-t border-line pt-1.5">
+            "Needs review" means allowed despite the agent expecting a refusal — a candidate,
+            read by a human before it is called a hole.
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function RightPanel(props) {
   const [mode, setMode] = useState('ledger');
+  const tabs = [['ledger','Ledger'],['differential','Differential'],['agent','Agents']];
   return (
     <aside className="w-[300px] shrink-0 flex flex-col bg-panel/30 overflow-hidden">
       <div className="flex items-center gap-1 px-2 h-10 border-b border-line">
-        {[['ledger','Ledger'],['differential','Differential']].map(([k,l]) => (
+        {tabs.map(([k,l]) => (
           <button key={k} onClick={()=>setMode(k)}
-            className={`text-[11px] font-semibold px-2.5 py-1 rounded ${mode===k?'text-txt bg-accent/15 border border-accent/40':'text-dim border border-transparent hover:text-txt'}`}>{l}</button>
+            className={`text-[11px] font-semibold px-2 py-1 rounded ${mode===k?'text-txt bg-accent/15 border border-accent/40':'text-dim border border-transparent hover:text-txt'}`}>{l}</button>
         ))}
       </div>
       <div className="flex-1 overflow-hidden">
-        {mode==='ledger' ? <LedgerPanel {...props} /> : <DifferentialPanel summary={props.summary} />}
+        {mode==='ledger' && <LedgerPanel {...props} />}
+        {mode==='differential' && <DifferentialPanel summary={props.summary} />}
+        {mode==='agent' && <AgentPanel live={props.live} />}
       </div>
     </aside>
   );
