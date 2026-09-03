@@ -1,3 +1,4 @@
+<meta charset="utf-8">
 <title>SIEVE Console</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -56,7 +57,7 @@ const _sameOrigin = location.protocol.startsWith('http') &&
 const API_BASE = (_override || (_sameOrigin ? '' : DEFAULT_GATEWAY)).replace(/\/$/, '');
 const api = (path) => API_BASE + path;
 
-/* ── Recorded fallback ───────────────────────────────────────────────────────
+/* -- Recorded fallback -------------------------------------------------------
    When the console is opened without the SIEVE server behind it (e.g. as a
    published page), it shows data RECORDED FROM A REAL RUN rather than invented
    numbers, and labels itself RECORDED so it never claims to be live.          */
@@ -110,7 +111,7 @@ function Dot({ c, pulse }) {
 }
 const Divider = () => <span className="w-px h-4 bg-line" />;
 
-/* ── Status bar ───────────────────────────────────────────────────────────── */
+/* -- Status bar ------------------------------------------------------------- */
 function StatusBar({ live, summary, contained, total }) {
   const fr = summary.falseRefusal;
   return (
@@ -138,7 +139,7 @@ function StatusBar({ live, summary, contained, total }) {
   );
 }
 
-/* ── Storefront ───────────────────────────────────────────────────────────── */
+/* -- Storefront ------------------------------------------------------------- */
 function Storefront({ onBuy, busy, targetSku }) {
   return (
     <aside className="w-[310px] shrink-0 flex flex-col border-r border-line bg-panel/30 overflow-hidden">
@@ -181,7 +182,7 @@ function Storefront({ onBuy, busy, targetSku }) {
   );
 }
 
-/* ── Verification pipeline (the glass box) ────────────────────────────────── */
+/* -- Verification pipeline (the glass box) ---------------------------------- */
 function Pipeline({ verdict, label, busy }) {
   return (
     <section className="flex-1 min-w-[420px] flex flex-col border-r border-line overflow-hidden">
@@ -241,7 +242,7 @@ function Pipeline({ verdict, label, busy }) {
   );
 }
 
-/* ── Attack scoreboard ────────────────────────────────────────────────────── */
+/* -- Attack scoreboard ------------------------------------------------------ */
 function Scoreboard({ attacks, onRunAll, onPick, running, selected, summary }) {
   const contained = attacks.filter(a => a.status === 'contained').length;
   return (
@@ -291,7 +292,7 @@ function Scoreboard({ attacks, onRunAll, onPick, running, selected, summary }) {
   );
 }
 
-/* ── Right panel ──────────────────────────────────────────────────────────── */
+/* -- Right panel ------------------------------------------------------------ */
 function LedgerPanel({ live, ledger, onTamper, tampered }) {
   const bad = tampered && ledger.brokenSeq !== null && ledger.brokenSeq !== undefined;
   return (
@@ -472,7 +473,7 @@ function RightPanel(props) {
   );
 }
 
-/* ── SSE strip ────────────────────────────────────────────────────────────── */
+/* -- SSE strip -------------------------------------------------------------- */
 const EVC = { ALLOW:'#00D26A', REFUSE:'#FF4D4F', PROV:'#8B8F99' };
 function SSEStrip({ lines, live }) {
   const ref = useRef(null);
@@ -501,7 +502,7 @@ function SSEStrip({ lines, live }) {
   );
 }
 
-/* ── App ──────────────────────────────────────────────────────────────────── */
+/* -- App -------------------------------------------------------------------- */
 function App() {
   const [live, setLive] = useState(false);
   const [attacks, setAttacks] = useState(RECORDED_ATTACKS.map(a => ({...a, status:'pending'})));
