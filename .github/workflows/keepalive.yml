@@ -1,0 +1,37 @@
+# Keeps a free single-instance backend warm so judges never hit a cold start.
+#
+# Render's free tier sleeps after 15 minutes idle. GitHub Actions minutes are
+# free and unlimited on a public repo, so this cron pings the gateway every
+# 10 minutes — comfortably under the sleep window even when GitHub delays a
+# scheduled run. One always-on service fits inside Render's 750h/month.
+#
+# Set the repo variable RENDER_URL (Settings -> Secrets and variables ->
+# Actions -> Variables) to the deployed base URL once it exists. Until then the
+# job no-ops rather than failing.
+name: keepalive
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch: {}
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping the gateway health endpoint
+        env:
+          URL: ${{ vars.RENDER_URL }}
+        run: |
+          if [ -z "$URL" ]; then
+            echo "RENDER_URL not set yet — nothing to ping. Exiting cleanly."
+            exit 0
+          fi
+          code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 40 "$URL/v1/health" || echo "000")
+          echo "GET $URL/v1/health -> $code"
+          # A cold start can take ~50s; a second nudge covers the wake-up.
+          if [ "$code" = "000" ]; then
+            sleep 5
+            curl -s -o /dev/null --max-time 60 "$URL/v1/health" || true
+            echo "sent wake-up nudge"
+          fi
