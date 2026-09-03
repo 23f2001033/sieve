@@ -40,10 +40,20 @@
 <script type="text/babel" data-presets="react">
 const { useState, useEffect, useRef, useCallback } = React;
 
-/* Where the gateway lives. Same-origin when the console is served BY the
-   gateway; override with ?api=https://host when the page is hosted separately
-   (e.g. static on Vercel, gateway on a single-instance host). */
-const API_BASE = (new URLSearchParams(location.search).get('api') || '').replace(/\/$/, '');
+/* Where the gateway lives, resolved in priority order:
+     1. ?api=https://host              explicit override, always wins
+     2. same-origin                    when the gateway itself serves this page
+        (localhost, or the onrender.com deployment)
+     3. the public deployment          so a copy hosted elsewhere (HF static,
+        a local file) is live by default, not stuck in RECORDED mode
+   If the chosen gateway is unreachable the page falls back to RECORDED and
+   says so — it never fakes a live connection. */
+const DEFAULT_GATEWAY = 'https://sieve-gateway.onrender.com';
+const _override = new URLSearchParams(location.search).get('api');
+const _sameOrigin = location.protocol.startsWith('http') &&
+  (location.hostname === 'localhost' || location.hostname === '127.0.0.1' ||
+   location.hostname.endsWith('onrender.com'));
+const API_BASE = (_override || (_sameOrigin ? '' : DEFAULT_GATEWAY)).replace(/\/$/, '');
 const api = (path) => API_BASE + path;
 
 /* ── Recorded fallback ───────────────────────────────────────────────────────
