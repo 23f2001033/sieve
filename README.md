@@ -18,7 +18,7 @@ Reproduce every number above from a clean checkout:
 python scripts/reproduce.py --benign 1000 --seed 42
 ```
 
-Full breakdown: **[docs/RESULTS.md](docs/RESULTS.md)** · What broke while building it: **[docs/ENGINEERING_LOG.md](docs/ENGINEERING_LOG.md)** · What this can't do: **[docs/LIMITS.md](docs/LIMITS.md)**
+Full breakdown: **[docs/RESULTS.md](docs/RESULTS.md)** · Why it's built this way: **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** · What broke while building it: **[docs/ENGINEERING_LOG.md](docs/ENGINEERING_LOG.md)** · What this can't do: **[docs/LIMITS.md](docs/LIMITS.md)**
 
 ---
 
