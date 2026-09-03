@@ -14,5 +14,7 @@ RUN pip install --no-cache-dir -e .
 COPY ui ./ui
 COPY scripts ./scripts
 
-EXPOSE 8000
-CMD ["python", "-m", "uvicorn", "sieve.gateway.api:app", "--host", "0.0.0.0", "--port", "8000"]
+# Binds $PORT when the host injects one (Render), else 7860 (the Hugging Face
+# Spaces default). One image serves both.
+EXPOSE 7860
+CMD ["sh", "-c", "uvicorn sieve.gateway.api:app --host 0.0.0.0 --port ${PORT:-7860}"]
