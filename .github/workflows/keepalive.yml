@@ -9,6 +9,7 @@
 # Actions -> Variables) to the deployed base URL once it exists. Until then the
 # job no-ops rather than failing.
 name: keepalive
+# rev: 1 (nudge Actions to register the workflow)
 
 on:
   schedule:
