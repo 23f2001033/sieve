@@ -307,16 +307,17 @@ function Scoreboard({ attacks, onRunAll, onPick, running, selected, summary }) {
       </div>
       <div className="border-t border-line p-3">
         <div className="text-[10px] font-semibold tracking-wider text-faint mb-2">DIFFERENTIAL · SAME CORPUS</div>
-        <div className="grid grid-cols-3 gap-2 mb-3">
-          {[['SIEVE', `${summary.sieve.contained}/${summary.sieve.total}`, '#00D26A'],
-            ['NAIVE', `${summary.naive.contained}/${summary.naive.total}`, '#FF4D4F'],
-            ['RZP-MCP', '—', '#FFB020']].map(([k,v,c]) => (
-            <div key={k} className="rounded-md border p-2 text-center" style={{borderColor:c+'40',background:c+'0d'}}>
+        <div className="grid grid-cols-3 gap-2 mb-2">
+          {[['SIEVE', `${summary.sieve.contained}/${summary.sieve.total}`, '#00D26A', 'the reference gateway'],
+            ['NAIVE', `${summary.naive.contained}/${summary.naive.total}`, '#FF4D4F', 'amount-cap + confirm — the common design'],
+            ['RZP-MCP', 'n/a', '#FFB020', "Razorpay's own MCP: a raw payment API with no delegation layer. Not a competitor — the surface SIEVE bounds. See the Differential tab."]].map(([k,v,c,tip]) => (
+            <div key={k} title={tip} className="rounded-md border p-2 text-center cursor-help" style={{borderColor:c+'40',background:c+'0d'}}>
               <div className="text-[9px] font-semibold text-dim">{k}</div>
               <div className="text-[15px] font-bold tnum" style={{color:c}}>{v}</div>
             </div>
           ))}
         </div>
+        <div className="text-[9px] text-faint text-center mb-3">RZP-MCP has no delegation layer to score — SIEVE is the bounds layer in front of it →</div>
         <button onClick={onRunAll} disabled={running}
           className="w-full h-9 rounded-md bg-accent hover:bg-accent/90 disabled:opacity-50 text-white text-[12.5px] font-semibold">
           {running ? 'RUNNING…' : '▶  RUN ALL ATTACKS'}
@@ -616,13 +617,21 @@ function App() {
 
   const runAll = useCallback(async () => {
     setRunning(true);
+    // Populate the glass box with a representative decision so the centre is
+    // never awkwardly empty during a full run, whatever the click order.
+    setLabel('attack B7'); setTargetSku('TENT-2P'); setSelected('B7');
     if (!live) {
+      setVerdict(RECORDED_B7);
       for (let i = 0; i < attacks.length; i++) {
         await new Promise(r => setTimeout(r, 110));
         setAttacks(p => p.map((a,j) => j===i ? {...a, status:'contained'} : a));
       }
       setRunning(false); return;
     }
+    // Fire the B7 pipeline into the centre in parallel with the corpus run.
+    fetch(api('/v1/attack/B7'), {method:'POST'})
+      .then(r => r.json()).then(d => { if (d && d.sieve) setVerdict(d.sieve); })
+      .catch(() => {});
     setAttacks(p => p.map(a => ({...a, status:'running'})));
     try {
       const rep = await (await fetch(api('/v1/run-corpus'), {method:'POST'})).json();
