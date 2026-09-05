@@ -260,35 +260,28 @@ An attack diverges at step 4 and never reaches 5.
 
 Ordered by evidence-per-hour, honestly assessed.
 
-### Highest value
+### Done since the first draft of this section
 
-**1. A second red-team run with a stronger model, and publish the transcript.**
-The current run is 8 probes with 0 confirmed findings — a weak claim, and the
-README says so. A longer run (or a better model) either finds something real,
-which is gold, or makes "we tried hard and found nothing" credible. Cheap, and
-the honest framing is already in place.
+**1. Property-based fuzzing over mandates (Hypothesis).** ✅ Built
+(`tests/test_fuzz_invariant.py`). 1,500 generated chains against *"no ALLOW ever
+exceeds the human root's grant"* — held, no counterexample. Changed the claim from
+"I tested 16 attacks" to "a property over thousands of generated inputs."
 
-**2. Property-based fuzzing over mandates (Hypothesis).**
-The corpus tests 16 things I thought of. Hypothesis generating malformed chains
-against the invariant *"no chain lacking valid narrowing from a trusted root may
-ever produce an ALLOW"* would search a space no hand-written corpus covers, and
-shrink any counterexample to a minimal case. This is the single most credible
-addition available: it changes the claim from "I tested 16 attacks" to "I tested a
-property over thousands of generated inputs."
+**2. Sign the ledger entries.** ✅ Built (`tests/test_signed_ledger.py`). Every
+entry signed with the gateway key; a full forward-rewrite that stays hash-consistent
+is still caught by the signature. Bar raised from "DB write" to "key compromise".
 
-**3. Sign the ledger entries.**
-Currently tamper-*evident*: anyone with database write access can recompute the
-chain forward. Signing each entry with a gateway key raises the bar from "DB
-write" to "key compromise" — an afternoon's work, no new infrastructure, and it
-retires the weakest sentence in LIMITS.md.
+**3. Multi-process concurrency proof.** ✅ Built
+(`tests/test_multiprocess_concurrency.py`). Independent OS processes race the same
+idempotency key; exactly one wins. The `UNIQUE` constraint is the serialisation
+point across processes, not just threads — the GIL objection is retired.
 
-### Worth it if time allows
+### Still worth doing
 
-**4. Multi-process concurrency proof.** The exactly-once test is 25 threads in
-one process; the GIL means it demonstrates the mechanism, not true parallelism.
-Two OS processes against one SQLite file would prove the `UNIQUE` constraint
-really is the serialisation point — and would let the naive baseline genuinely
-double-charge, turning C11 into a real differential instead of a GIL artifact.
+**4. A second red-team run with a stronger model, and publish the transcript.**
+The current run is 8 probes with 0 confirmed findings — the README says so. A
+longer run either finds something real or makes "tried hard, found nothing"
+credible.
 
 **5. Revocation propagation.** Revocation is checked against a set supplied per
 request; there is no distribution mechanism or grace window. The interesting

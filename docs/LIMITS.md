@@ -50,18 +50,22 @@ lives on the same single node, so a full host compromise still defeats it. The
 production answer is external anchoring — publishing the signed chain head to an
 append-only log outside the host's reach on a fixed cadence — which is not built.
 
-## Concurrency is proven within one process only
+## Concurrency is proven across processes, not just threads
 
 `tests/test_concurrency.py` releases 25 threads through a barrier onto a real
-database and asserts exactly one charge. That is a genuine race, not a simulated
-one, and it is stable across repeated runs.
+database and asserts exactly one charge. `tests/test_multiprocess_concurrency.py`
+then removes the obvious objection — that the guarantee rides on the GIL — by
+spawning several independent OS processes that claim the same idempotency key at
+the same instant, with no shared interpreter or lock between them. Exactly one
+wins, stably across repeated runs. The `UNIQUE` constraint is the serialisation
+point; nothing in application code resolves the race.
 
-It is still one process. The GIL means Python threads interleave at a coarser
-grain than true parallelism would, so this demonstrates the mechanism is correct
-under contention — not that it survives multi-process load. This is also why the
-naive baseline "contains" the concurrent double-spend: its non-atomic
-check-then-add happens to be serialised by the GIL. That result is reported as an
-artifact of the harness rather than counted as a differential win.
+One honest consequence remains, and it is about the *naive baseline*, not SIEVE:
+in the single-process corpus harness the naive gateway "contains" the concurrent
+double-spend because the GIL happens to serialise its non-atomic check-then-add.
+That is reported as an artifact of the in-process harness rather than counted as a
+differential win — the corpus runs the naive gateway in-process, so it does not
+get to exhibit the failure the multi-process test would provoke.
 
 ## Single-tenant
 

@@ -200,4 +200,4 @@ ui/console.html    the glass box
 scripts/reproduce.py  one command, every number
 ```
 
-**54 tests**, written as attacks and honest-transaction pairs. Each asserts the *specific* refusal reason — a verifier that says no for the wrong reason is indistinguishable from a broken one under a suite that only checks `allowed is False`.
+**89 tests plus property-based fuzzing**, written as attacks and honest-transaction pairs. Each asserts the *specific* refusal reason — a verifier that says no for the wrong reason is indistinguishable from a broken one under a suite that only checks `allowed is False`. Beyond the fixed corpus, Hypothesis generates **1,500+ delegation chains** (including widening ones) against the invariant that no ALLOW can ever exceed the human root's grant, and exactly-once is proven across real **OS processes**, not just threads — so the guarantee cannot be dismissed as a GIL artifact.

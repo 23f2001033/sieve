@@ -467,3 +467,55 @@ fixed in the follow-up commit. And the fix is not a workaround: sharing a
 dependency is genuinely the right structure, and the guard pushed me to it.
 
 **80 tests passing.**
+
+---
+
+## 2026-09-03 (final hardening before the video)
+
+Three gaps I had named honestly in LIMITS.md and ARCHITECTURE.md as "not done",
+closed in priority order.
+
+### #12 — Property-based fuzzing of the root-ceiling invariant
+
+The 16-attack corpus tests what I thought of. Hypothesis now generates delegation
+chains — 1 to 4 hops, arbitrary per-hop authority including widening ones — and
+asserts the one property the whole model exists to guarantee: **no ALLOW can move
+money past what the human root granted**, in amount, category, or capability. A
+second property asserts any chain containing a widening hop is refused.
+
+Held across 1,500 generated chains, derandomized so the reproduce command is
+stable. It did **not** find a counterexample — which is an honest "no bug found",
+not "found and fixed". But it upgrades the claim from "16 attacks contained" to
+"no generated chain, widening or not, ever escaped the human's grant", which is a
+categorically stronger statement. If it had found something, that would have been
+the best story in the submission; it didn't, and I am not going to pretend
+otherwise.
+
+### #13 — Signing the ledger
+
+The ledger was tamper-*evident*: a hash chain that a DB-write attacker can
+recompute forward and leave consistent. Now every entry is signed with the
+gateway's Ed25519 key, and `verify()` checks it.
+
+The test that matters is `test_full_forward_rewrite_is_caught_by_the_signature`:
+it performs the exact attack a plain hash chain cannot stop — edit an entry, then
+rewrite every subsequent hash so the chain is internally consistent again — and
+the verifier still catches it, because the attacker cannot sign the rewritten
+entry without the key. The tamper-demo endpoint now does the same, so the UI shows
+the *sophisticated* attack being defeated, not a naive body edit. Moves the bar
+from "anyone with DB write" to "someone who also holds the gateway key"; the
+remaining gap (key on the same host) is named rather than hidden.
+
+### #14 — Multi-process concurrency, to kill the GIL objection
+
+The exactly-once proof was 25 threads in one process, and a sceptic could argue
+the guarantee rode on the GIL. `test_multiprocess_concurrency.py` spawns several
+independent OS processes that claim the same idempotency key at the same instant —
+no shared interpreter, no shared lock — and exactly one wins, stable across five
+repeated runs. The `UNIQUE` constraint is demonstrably the serialisation point,
+across processes, not just threads.
+
+**90 tests + 2 fuzz properties passing.** Every "not done" I could close in the
+time before recording is closed; the ones that remain (external ledger anchoring,
+multi-tenant namespacing, key rotation) are genuinely out of scope for a
+single-node build and stay named in LIMITS.md.
