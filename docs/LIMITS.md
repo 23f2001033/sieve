@@ -30,21 +30,25 @@ None of these are hard problems. They are simply not three-day problems, and
 building half of each would have produced a system that is neither correct at one
 node nor correct at many.
 
-## The ledger is tamper-evident, not tamper-proof
+## The ledger resists rewrites up to gateway-key compromise
 
-Each entry's hash includes the previous entry's, so altering any past entry breaks
-every hash after it and the verifier names the exact sequence number where the
-chain first fails. That is real and demonstrated.
+Each entry's hash includes the previous entry's, and — the update since the first
+draft of this file — **each entry is signed with the gateway's Ed25519 key.**
 
-But an attacker with **database write access** can recompute the whole chain
-forward from their edit and leave it internally consistent. Detection requires an
-anchor the attacker cannot also rewrite. The production answer is to publish the
-chain head to an append-only log outside the attacker's reach on a fixed cadence;
-the cheap intermediate step is signing each entry with a gateway key, which raises
-the bar from "database write" to "key compromise."
+The hash chain alone is only tamper-*evident*: an attacker with database write
+access can recompute every hash forward from their edit and leave the chain
+internally consistent, defeating a plain chain. The signature is what stops that.
+`tests/test_signed_ledger.py::test_full_forward_rewrite_is_caught_by_the_signature`
+performs exactly that attack — edits an entry, rewrites every subsequent hash so
+the chain is consistent again — and the verifier still catches it, because the
+attacker cannot produce a valid signature over the rewritten entry without the
+key.
 
-Neither is built. The verifier proves internal consistency, and that is all it
-claims.
+That moves the bar from "anyone with database write access" to "someone who also
+holds the gateway signing key." The remaining gap is honest and named: the key
+lives on the same single node, so a full host compromise still defeats it. The
+production answer is external anchoring — publishing the signed chain head to an
+append-only log outside the host's reach on a fixed cadence — which is not built.
 
 ## Concurrency is proven within one process only
 

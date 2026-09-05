@@ -28,8 +28,10 @@ from dataclasses import dataclass
 from typing import Any
 
 from sieve.contracts.canonical import canonical_digest
+from sieve.gateway.crypto import SigningKey, verify_signature
 
 GENESIS_PREV_HASH = "0" * 64
+DOMAIN_LEDGER_SIG = "ledger-signature"
 
 
 @dataclass(frozen=True, slots=True)
@@ -39,6 +41,7 @@ class LedgerEntry:
     entry_hash: str
     kind: str  # "allow" | "refuse"
     body: dict[str, Any]
+    signature: str | None = None  # hex Ed25519 sig by the gateway key, if signed
 
     def to_json(self) -> dict[str, Any]:
         return {
@@ -47,7 +50,14 @@ class LedgerEntry:
             "entry_hash": self.entry_hash,
             "kind": self.kind,
             "body": self.body,
+            "signed": self.signature is not None,
         }
+
+
+def _sig_body(seq: int, entry_hash: str) -> dict[str, Any]:
+    """What the gateway key signs for an entry. Binding the seq as well as the
+    hash means a signature cannot be lifted from one position to another."""
+    return {"seq": seq, "entry_hash": entry_hash}
 
 
 @dataclass(frozen=True, slots=True)
@@ -89,9 +99,16 @@ class SqliteLedger:
     row updated under a transaction; single-node is the documented scope.)
     """
 
-    def __init__(self, db_path: str) -> None:
+    def __init__(self, db_path: str, *, signing_key: SigningKey | None = None) -> None:
         self._db_path = db_path
         self._append_lock = threading.Lock()
+        # When a signing key is present, every entry is signed and verify() checks
+        # the signature. This is the difference between tamper-EVIDENT and
+        # tamper-RESISTANT: a hash chain can be recomputed forward by anyone with
+        # database write access, but a valid signature cannot be forged without
+        # this key. See docs/LIMITS.md.
+        self._signing_key = signing_key
+        self._verify_key_hex = signing_key.public_hex if signing_key else None
         conn = self._connect()
         try:
             conn.execute(
@@ -100,12 +117,17 @@ class SqliteLedger:
                 "  prev_hash TEXT NOT NULL,"
                 "  entry_hash TEXT NOT NULL,"
                 "  kind TEXT NOT NULL,"
-                "  body_json TEXT NOT NULL"
+                "  body_json TEXT NOT NULL,"
+                "  signature TEXT"
                 ")"
             )
             conn.commit()
         finally:
             conn.close()
+
+    @property
+    def verify_key_hex(self) -> str | None:
+        return self._verify_key_hex
 
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self._db_path, timeout=30.0, isolation_level=None)
@@ -126,10 +148,14 @@ class SqliteLedger:
                     seq, prev_hash = row[0] + 1, row[1]
 
                 entry_hash = compute_entry_hash(seq, prev_hash, kind, body)
+                signature = None
+                if self._signing_key is not None:
+                    signature = self._signing_key.sign(
+                        DOMAIN_LEDGER_SIG, _sig_body(seq, entry_hash)).hex()
                 conn.execute(
-                    "INSERT INTO ledger (seq, prev_hash, entry_hash, kind, body_json) "
-                    "VALUES (?, ?, ?, ?, ?)",
-                    (seq, prev_hash, entry_hash, kind, json.dumps(body)),
+                    "INSERT INTO ledger (seq, prev_hash, entry_hash, kind, body_json, "
+                    "signature) VALUES (?, ?, ?, ?, ?, ?)",
+                    (seq, prev_hash, entry_hash, kind, json.dumps(body), signature),
                 )
                 return LedgerEntry(
                     seq=seq,
@@ -137,6 +163,7 @@ class SqliteLedger:
                     entry_hash=entry_hash,
                     kind=kind,
                     body=body,
+                    signature=signature,
                 )
             finally:
                 conn.close()
@@ -145,8 +172,8 @@ class SqliteLedger:
         conn = self._connect()
         try:
             rows = conn.execute(
-                "SELECT seq, prev_hash, entry_hash, kind, body_json FROM ledger "
-                "ORDER BY seq ASC"
+                "SELECT seq, prev_hash, entry_hash, kind, body_json, signature "
+                "FROM ledger ORDER BY seq ASC"
             ).fetchall()
         finally:
             conn.close()
@@ -157,6 +184,7 @@ class SqliteLedger:
                 entry_hash=r[2],
                 kind=r[3],
                 body=json.loads(r[4]),
+                signature=r[5],
             )
             for r in rows
         ]
@@ -209,6 +237,28 @@ class SqliteLedger:
                         f"{entry.entry_hash[:12]}… but recomputes to {recomputed[:12]}…"
                     ),
                 )
+
+            # Signature check. This is what a recomputed-forward rewrite cannot
+            # survive: an attacker with DB write can fix every hash to be
+            # internally consistent, but cannot produce a valid signature over the
+            # tampered entry without the gateway key.
+            if self._verify_key_hex is not None:
+                ok = entry.signature is not None and verify_signature(
+                    self._verify_key_hex, DOMAIN_LEDGER_SIG,
+                    _sig_body(entry.seq, entry.entry_hash),
+                    bytes.fromhex(entry.signature),
+                )
+                if not ok:
+                    return IntegrityResult(
+                        valid=False,
+                        entries_checked=index,
+                        head_hash=expected_prev,
+                        broken_at_seq=entry.seq,
+                        detail=(
+                            f"entry {entry.seq} is not validly signed by the gateway "
+                            f"key — the chain was rewritten without it"
+                        ),
+                    )
 
             expected_prev = entry.entry_hash
 

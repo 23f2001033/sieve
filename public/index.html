@@ -318,8 +318,10 @@ function LedgerPanel({ live, ledger, onTamper, tampered }) {
         </span>
       </label>
       <p className="text-[10.5px] text-dim leading-relaxed border-t border-line pt-2">
-        Tamper-<b>evident</b>, not tamper-proof: rewriting the whole chain forward is still possible
-        with database write access. External anchoring is the production requirement — see LIMITS.md.
+        Every entry is <b>signed by the gateway key</b>, so even a chain rewritten
+        forward to stay hash-consistent is caught — the attacker can fix the hashes
+        but cannot forge the signature. External anchoring against gateway-key
+        compromise is the remaining step; see LIMITS.md.
       </p>
     </div>
   );

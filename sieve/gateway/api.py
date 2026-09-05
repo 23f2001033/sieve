@@ -87,10 +87,14 @@ class Demo:
 
         d = Path(tempfile.gettempdir()) / "sieve-api" / uuid.uuid4().hex
         d.mkdir(parents=True, exist_ok=True)
+        from sieve.gateway.crypto import SigningKey
         from sieve.gateway.razorpay import RazorpayTestMode
 
         self.world = World()
-        self.ledger = SqliteLedger(str(d / "ledger.db"))
+        # The gateway's own key signs every ledger entry, so a chain rewritten by
+        # an attacker with DB access is caught even when internally consistent.
+        self.gateway_key = SigningKey.generate()
+        self.ledger = SqliteLedger(str(d / "ledger.db"), signing_key=self.gateway_key)
         self.rail = RazorpayTestMode()
         self.gateway = SieveGateway(
             payments=self.rail,
@@ -279,29 +283,52 @@ def create_app() -> FastAPI:
 
     @app.post("/v1/ledger/tamper-demo")
     async def tamper_demo():
-        """Build a scratch ledger, append real entries, verify (valid), then
-        tamper one row and verify again (broken). Returns both so the UI can show
-        detection without touching the live ledger."""
+        """Show that a SOPHISTICATED tamper is still caught. A naive attacker who
+        just edits a row is caught by the hash chain. This demo goes further: it
+        edits entry #4 AND rewrites every hash forward so the chain is internally
+        consistent again — exactly what defeats a plain hash chain — and shows the
+        signature catches it anyway, because the attacker cannot re-sign without
+        the gateway key. Runs on a scratch ledger; the live one is untouched."""
         import sqlite3
         import tempfile
         import uuid
 
+        from sieve.gateway.crypto import SigningKey
+        from sieve.gateway.ledger import compute_entry_hash
+
         d = Path(tempfile.gettempdir()) / "sieve-tamper" / uuid.uuid4().hex
         d.mkdir(parents=True, exist_ok=True)
-        scratch = SqliteLedger(str(d / "scratch.db"))
+        gk = SigningKey.generate()
+        path = str(d / "scratch.db")
+        scratch = SqliteLedger(path, signing_key=gk)
         for i in range(8):
             scratch.append("allow", {"seq_demo": i, "amount_paise": 1200_00, "sku": "TENT-2P"})
         before = scratch.verify().to_json()
 
-        # Tamper entry #4's body directly in the DB — the kind of edit a DB-write
-        # attacker would make. The chained hash no longer matches.
-        conn = sqlite3.connect(str(d / "scratch.db"))
-        conn.execute("UPDATE ledger SET body_json = ? WHERE seq = 4",
-                     (json.dumps({"seq_demo": 4, "amount_paise": 120000_00, "sku": "TENT-2P"}),))
+        # The attacker rewrites the chain forward from entry #4, fixing every hash
+        # so a plain hash-chain check would pass — but leaves the signatures, which
+        # they cannot forge.
+        tampered_seq = 4
+        conn = sqlite3.connect(path)
+        rows = conn.execute(
+            "SELECT seq, entry_hash, kind, body_json FROM ledger ORDER BY seq"
+        ).fetchall()
+        prev = rows[tampered_seq - 1][1]  # unchanged entry #3's hash
+        for seq, entry_hash, kind, body_json in rows[tampered_seq:]:
+            body = json.loads(body_json)
+            if seq == tampered_seq:
+                body = {"seq_demo": 4, "amount_paise": 120000_00, "sku": "TENT-2P"}
+            new_hash = compute_entry_hash(seq, prev, kind, body)
+            conn.execute(
+                "UPDATE ledger SET prev_hash = ?, entry_hash = ?, body_json = ? WHERE seq = ?",
+                (prev, new_hash, json.dumps(body), seq))
+            prev = new_hash
         conn.commit()
         conn.close()
+
         after = scratch.verify().to_json()
-        return {"before": before, "after": after, "tampered_seq": 4}
+        return {"before": before, "after": after, "tampered_seq": tampered_seq,
+                "note": "chain rewritten forward to stay hash-consistent; caught by signature"}
 
     @app.get("/v1/trace")
     async def trace():
